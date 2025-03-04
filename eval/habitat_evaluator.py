@@ -14,6 +14,7 @@ from os import listdir
 import gzip
 import json
 import pathlib
+import tqdm
 
 # cv2
 import cv2
@@ -117,7 +118,7 @@ class HabitatEvaluator:
                                                                                 self.object_nav_path)
         if self.actor is not None:
             self.logger = rerun_logger.RerunLogger(self.actor.mapper, False, "") if self.log_rerun else None
-        self.results_path = "/home/finn/active/MON/results_gibson" if self.is_gibson else "results/"
+        self.results_path = "/home/finn/active/MON/results_gibson" if self.is_gibson else "results"
 
     def load_scene(self, scene_id: str):
         if self.sim is not None:
@@ -301,6 +302,7 @@ class HabitatEvaluator:
         obj_count = {}
         results = []
         # restart at 930
+        pbar = tqdm.tqdm(total=len(self.episodes))
         for n_ep, episode in enumerate(self.episodes):
         # for n_ep, episode in enumerate(self.episodes[492:]):
             poses = []
@@ -426,3 +428,7 @@ class HabitatEvaluator:
             # Write result to file
             with open(f"{self.results_path}/state/state_{episode.episode_id}.txt", 'w') as f:
                 f.write(str(results[n_ep].value))
+
+            pbar.update()
+
+        pbar.close()

@@ -12,7 +12,8 @@ def main():
     evaluator = HabitatMultiEvaluator(eval_config.EvalConf, None)
     # data = evaluator.read_results('/home/finn/active/MON/results_vlfm/', "opt_PL", os.path.join("./", 'vlfm.pkl'))
     # pickle_path = os.path.join("./", 'vlfm.pkl')
-    data = evaluator.read_results('results_multi/', "s",  os.path.join("./", 'multi.pkl'))
+    # data = evaluator.read_results('results_multi/', "s",  os.path.join("./", 'multi.pkl'))
+    data = evaluator.read_results('results_multi/', "s")
     # pickle_path = os.path.join("./", 'multi_noGlasses.pkl')
     # with open(pickle_path, 'wb') as f:
     #     pickle.dump(data, f)

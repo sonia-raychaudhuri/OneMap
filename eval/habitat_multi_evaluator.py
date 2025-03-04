@@ -16,6 +16,7 @@ from os import listdir
 import gzip
 import json
 import pathlib
+import tqdm
 
 # cv2
 import cv2
@@ -276,13 +277,6 @@ class HabitatMultiEvaluator:
                                 floor_data = scenes[self.episodes[experiment_num].scene_id].floors[self.episodes[experiment_num].floor_id]
                                 possible_objs = floor_data.objects[self.episodes[experiment_num].obj_sequence[seq_num]]
                                 min_dist = np.inf
-                                top_down_map = maps.get_topdown_map(
-                                                sim.pathfinder,
-                                                height=start_pos[1],
-                                                map_resolution=512,
-                                                draw_border=True,
-                                            )
-                                map_size = top_down_map.shape[0] * top_down_map.shape[1]
                                 obj_found = False
                                 for obj in possible_objs:
                                     dist, next_start = object_nav_gen.get_geodesic(pos, sim, obj, correct_start=True)
@@ -295,6 +289,17 @@ class HabitatMultiEvaluator:
                                 if not obj_found:
                                     print(f"Warning: No object found for sequence {seq_num} in experiment {experiment_num}")
                                 spl = min(1.0, 1 * (best_dist/ max(path_length, best_dist)))
+
+                            
+                            top_down_map = maps.get_topdown_map(
+                                            sim.pathfinder,
+                                            height=start_pos[1],
+                                            map_resolution=512,
+                                            draw_border=True,
+                                        )
+                            np.savez_compressed(f"{self.results_path}/saved_maps_gt/{self.episodes[experiment_num].episode_id}_{seq_num}.npz", gt_topdown_map=top_down_map)
+                            map_size = top_down_map.shape[0] * top_down_map.shape[1]
+
                             optimal_total_path_length = sum([d[0] for d in self.episodes[experiment_num].best_dist])
                             data.append({
                                 'experiment': experiment_num,
@@ -469,6 +474,7 @@ class HabitatMultiEvaluator:
     def evaluate(self):
         n_eps = 0
         results = []
+        pbar = tqdm.tqdm(total=len(self.episodes))
         for n_ep, episode in enumerate(self.episodes):
             poses = []
             metric = Metrics(episode.episode_id)
@@ -525,8 +531,8 @@ class HabitatMultiEvaluator:
                         cam_x = -self.sim.get_agent(0).get_state().position[2]
                         cam_y = -self.sim.get_agent(0).get_state().position[0]
                         rr.log("camera/rgb", rr.Image(observations["rgb"]).compress(jpeg_quality=50))
-                        # rr.log("camera/depth", rr.Image((observations["depth"] - observations["depth"].min()) / (
-                        #         observations["depth"].max() - observations["depth"].min())))
+                        rr.log("camera/depth", rr.Image((observations["depth"] - observations["depth"].min()) / (
+                                observations["depth"].max() - observations["depth"].min())))
                         self.logger.log_pos(cam_x, cam_y)
                     action, called_found = self.actor.act(observations)
                     self.execute_action(action)
@@ -574,6 +580,8 @@ class HabitatMultiEvaluator:
                         final_sim = (self.actor.mapper.get_map() + 1.0) / 2.0
                         confs = (self.actor.mapper.one_map.confidence_map > 0).cpu().squeeze().numpy()
                         nav_map = self.actor.mapper.one_map.navigable_map.astype(bool)
+                        feature_map = self.actor.mapper.one_map.feature_map.cpu().numpy().astype(float)
+                        np.savez_compressed(f"{self.results_path}/saved_maps/{episode.episode_id}_{sequence_id}.npz", nav_map=nav_map, feature_map=feature_map, query=current_obj)
                         final_sim = final_sim[0]
                         final_sim = monochannel_to_inferno_rgb(final_sim)
 
@@ -647,3 +655,6 @@ class HabitatMultiEvaluator:
             with open(f"{self.results_path}/state/state_{episode.episode_id}.txt", 'w') as f:
                 f.write(','.join(
                     str(results[n_ep].sequence_results[i].value) for i in range(len(results[n_ep].sequence_results))))
+            pbar.update()
+        pbar.close()
+        
