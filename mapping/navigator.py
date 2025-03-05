@@ -436,8 +436,8 @@ class Navigator:
                     cluster_max_similarity[cluster_pts[:, 0], cluster_pts[:, 1]] = score
                 log_map_rerun(cluster_max_similarity, path="map/similarity_th2")
 
-            # if self.log:
-            #     log_map_rerun(unexplored_map, path="map/unexplored")
+            if self.log:
+                log_map_rerun(unexplored_map, path="map/unexplored")
 
             frontiers = [f[:, :, ::-1] for f in frontiers]  # need to flip coords for some reason
             adjusted_score_frontier = adjusted_score.copy()
