@@ -290,14 +290,31 @@ class HabitatMultiEvaluator:
                                     print(f"Warning: No object found for sequence {seq_num} in experiment {experiment_num}")
                                 spl = min(1.0, 1 * (best_dist/ max(path_length, best_dist)))
 
-                            
                             top_down_map = maps.get_topdown_map(
                                             sim.pathfinder,
-                                            height=start_pos[1],
+                                            height=self.episodes[experiment_num].start_position[1],
                                             map_resolution=512,
                                             draw_border=True,
                                         )
-                            np.savez_compressed(f"{self.results_path}/saved_maps_gt/{self.episodes[experiment_num].episode_id}_{seq_num}.npz", gt_topdown_map=top_down_map)
+                            # Draw the start position
+                            top_down_map = gen_multiobject_dataset.draw_point(
+                                sim,
+                                top_down_map,
+                                np.array(self.episodes[experiment_num].start_position),
+                                maps.MAP_SOURCE_POINT_INDICATOR,
+                            )
+
+                            # Draw the object goals
+                            object_goals = self.episodes[experiment_num].obj_sequence
+                            top_down_map = gen_multiobject_dataset.draw_point(
+                                sim,
+                                top_down_map,
+                                np.array(self.episodes[experiment_num].best_dist[seq_num][1]),
+                                maps.MAP_TARGET_POINT_INDICATOR,
+                            )
+
+                            # Colorize and save the map
+                            top_down_map = maps.colorize_topdown_map(top_down_map)
                             map_size = top_down_map.shape[0] * top_down_map.shape[1]
 
                             optimal_total_path_length = sum([d[0] for d in self.episodes[experiment_num].best_dist])
@@ -311,6 +328,13 @@ class HabitatMultiEvaluator:
                                 'object': self.episodes[experiment_num].obj_sequence[seq_num],
                                 'scene': self.episodes[experiment_num].scene_id
                             })
+
+                            np.savez_compressed(
+                                f"{self.results_path}/saved_maps_gt/{self.episodes[experiment_num].episode_id}_{seq_num}.npz",
+                                gt_topdown_map=top_down_map,
+                                gt_object_goals=object_goals,
+                                experiment_result=data
+                            )
 
                         # deltas = poses[1:, :3] - poses[:-1, :3]
                         # distance_traveled = np.linalg.norm(deltas, axis=1).sum()
@@ -437,7 +461,7 @@ class HabitatMultiEvaluator:
 
         # Plot SPL
         ax2.plot(np.arange(self.num_seq), spl_per_scene, label=scene, marker='o')
-            # Set up Success Rate subplot
+        # Set up Success Rate subplot
         ax1.set_xlabel('Sequence Number')
         ax1.set_ylabel('Success Rate')
         ax1.set_title('Success Rate per Sequence')
@@ -477,6 +501,7 @@ class HabitatMultiEvaluator:
         pbar = tqdm.tqdm(total=len(self.episodes))
         for n_ep, episode in enumerate(self.episodes):
             poses = []
+            map_poses_and_obs = []
             metric = Metrics(episode.episode_id)
             results.append(metric)
             if n_ep in self.exclude_ids:
@@ -507,6 +532,18 @@ class HabitatMultiEvaluator:
             while not_failed and sequence_id < len(episode.obj_sequence):
                 steps = 0
                 running = True
+                map_poses_and_obs = []
+                gt_goal_objects = []
+                for aabb in self.scene_data[episode.scene_id].object_locations[current_obj]:
+                    bbox = aabb.bbox
+                    center = bbox.center[[0, 2]]
+                    size = bbox.sizes[[0, 2]]
+                    gt_goal_objects.append({
+                        "object_category": current_obj,
+                        "center": center,
+                        "size": size,
+                        "center_map": self.actor.mapper.one_map.metric_to_px(center[0], center[1]),
+                    })
                 while steps < self.max_steps and running:
                     observations = self.sim.get_sensor_observations()
                     # observations['depth'] = fill_depth_holes(observations['depth'])
@@ -527,6 +564,10 @@ class HabitatMultiEvaluator:
                     pose[3] = yaw
 
                     poses.append(pose)
+                    map_poses_and_obs.append({"pose_xyzyaw": pose,
+                                              "pose_map": self.actor.mapper.one_map.metric_to_px(pose[0], pose[1]),
+                                              "obs_from_pose": observations
+                                              })
                     if self.log_rerun:
                         cam_x = -self.sim.get_agent(0).get_state().position[2]
                         cam_y = -self.sim.get_agent(0).get_state().position[0]
@@ -581,7 +622,6 @@ class HabitatMultiEvaluator:
                         confs = (self.actor.mapper.one_map.confidence_map > 0).cpu().squeeze().numpy()
                         nav_map = self.actor.mapper.one_map.navigable_map.astype(bool)
                         feature_map = self.actor.mapper.one_map.feature_map.cpu().numpy().astype(float)
-                        np.savez_compressed(f"{self.results_path}/saved_maps/{episode.episode_id}_{sequence_id}.npz", nav_map=nav_map, feature_map=feature_map, query=current_obj)
                         final_sim = final_sim[0]
                         final_sim = monochannel_to_inferno_rgb(final_sim)
 
@@ -595,6 +635,16 @@ class HabitatMultiEvaluator:
                         final_sim = final_sim.transpose((1, 0, 2))
                         final_sim = np.flip(final_sim, axis=0)                        # get min and max x and y of confs
 
+                        np.savez_compressed(
+                            f"{self.results_path}/saved_maps/{episode.episode_id}_{sequence_id}.npz",
+                            nav_map=nav_map,
+                            feature_map=feature_map,
+                            confidence_map=confs,
+                            query=current_obj,
+                            final_sim_img=final_sim,
+                            pose_observations=map_poses_and_obs,
+                            gt_goal_objects=gt_goal_objects
+                        )
 
                         cv2.imwrite(f"{self.results_path}/similarities/final_sim_{episode.episode_id}_{sequence_id}.png", final_sim)
                         # Create the plot
@@ -657,4 +707,3 @@ class HabitatMultiEvaluator:
                     str(results[n_ep].sequence_results[i].value) for i in range(len(results[n_ep].sequence_results))))
             pbar.update()
         pbar.close()
-        
