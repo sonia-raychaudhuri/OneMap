@@ -542,7 +542,7 @@ class HabitatMultiEvaluator:
                         "object_category": current_obj,
                         "center": center,
                         "size": size,
-                        "center_map": self.actor.mapper.one_map.metric_to_px(center[0], center[1]),
+                        "center_map": self.actor.mapper.one_map.metric_to_px(-center[1], -center[0]),
                     })
                 while steps < self.max_steps and running:
                     observations = self.sim.get_sensor_observations()
