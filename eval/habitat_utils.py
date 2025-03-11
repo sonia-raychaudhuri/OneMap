@@ -12,8 +12,12 @@ def get_bbox(center, size):
     return min_corner, max_corner
 
 
-def get_dist_to_bbox_2d(center, size, pos):
-    min_corner_2d, max_corner_2d = get_bbox(center, size)
+def get_dist_to_bbox_2d(center, size, pos, bbox=None):
+    if bbox is None:
+        min_corner_2d, max_corner_2d = get_bbox(center, size)
+    else:
+        min_corner_2d, max_corner_2d = bbox[1], bbox[5]
+        size = [np.abs(max_corner_2d[2] - min_corner_2d[2]), np.abs(max_corner_2d[1] - min_corner_2d[1])]
 
     dx = pos[0] - center[0]
     dy = pos[1] - center[1]
@@ -72,9 +76,16 @@ def get_dist_to_bbox_2d(center, size, pos):
         return 0
 
 
-def get_closest_dist(pos, aabbs: List, is_gibson=False):
+def get_closest_dist(pos, aabbs: List, is_gibson=False, is_langmon=False):
     min_dist = np.inf
-    if not is_gibson:
+    if is_langmon:
+        for _goal in aabbs:
+            dx = pos[0] - _goal['centroid'][0]
+            dy = pos[1] - _goal['centroid'][2]
+            dist = np.sqrt(dx * dx + dy * dy)
+            min_dist = min(min_dist, dist)
+        return min_dist
+    elif not is_gibson:
         for aabb in aabbs:
             bbox = aabb.bbox
             center = bbox.center[[0, 2]]

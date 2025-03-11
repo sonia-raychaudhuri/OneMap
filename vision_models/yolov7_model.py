@@ -88,7 +88,7 @@ class YOLOv7Detector:
             pred,
             0.25,
             0.45,
-            classes=self.classes_oi,
+            # classes=self.classes_oi,
             agnostic=False,
         )[0]
         # Rescale boxes from img_size to im0 size
