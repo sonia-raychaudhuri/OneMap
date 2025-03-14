@@ -168,7 +168,7 @@ class HabitatMultiEvaluator:
         rgb = habitat_sim.CameraSensorSpec()
         rgb.uuid = "rgb"
         rgb.hfov = hfov
-        rgb.position = np.array([0, 0.88, 0])
+        rgb.position = np.array([0, 1.5, 0])
         rgb.sensor_type = habitat_sim.SensorType.COLOR
         res_x = 640
         res_y = 640 if self.square else 480
@@ -178,13 +178,13 @@ class HabitatMultiEvaluator:
         depth.uuid = "depth"
         depth.hfov = hfov
         depth.sensor_type = habitat_sim.SensorType.DEPTH
-        depth.position = np.array([0, 0.88, 0])
+        depth.position = np.array([0, 1.5, 0])
         depth.resolution = [res_y, res_x]
         agent_cfg = habitat_sim.agent.AgentConfiguration(
             action_space=dict(
                 move_forward=ActionSpec("move_forward", ActuationSpec(amount=0.25)),
-                turn_left=ActionSpec("turn_left", ActuationSpec(amount=5.0)),
-                turn_right=ActionSpec("turn_right", ActuationSpec(amount=5.0)),
+                turn_left=ActionSpec("turn_left", ActuationSpec(amount=30.0)),
+                turn_right=ActionSpec("turn_right", ActuationSpec(amount=30.0)),
             )
         )
         agent_cfg.sensor_specifications = [rgb, depth]
@@ -239,6 +239,7 @@ class HabitatMultiEvaluator:
         pose_dir = os.path.join(
             os.path.abspath(os.path.join(state_dir, os.pardir)), "trajectories"
         )
+        os.makedirs(os.path.join(self.results_path, "saved_maps_gt"), exist_ok=True)
 
         # Iterate through all files in the state directory
         data = []
@@ -336,7 +337,9 @@ class HabitatMultiEvaluator:
                                 self.sim, shortest_paths[0], shortest_paths[-1]
                             )
                             goal_object = (
-                                " ".join(object_goals["extras"]["object_category"].split("_"))
+                                # " ".join(object_goals["object_category"].split('_'))
+                                object_goals["language_instruction"]
+                                # " ".join(object_goals["extras"]["object_category"].split("_"))
                             )
                             data.append(
                                 {
@@ -573,17 +576,6 @@ class HabitatMultiEvaluator:
             #     else " ".join(current_obj["object_category"].split('_'))
             # )
             self.actor.set_query(goal_query)
-            if self.log_rerun:
-                pts = []
-                for obj in current_obj["goal_object"]:
-                    pt = obj["centroid"]
-                    pt = (-pt[1], -pt[0])
-                    pts.append(self.actor.mapper.one_map.metric_to_px(*pt))
-                pts = np.array(pts)
-                rr.log(
-                    "map/ground_truth",
-                    rr.Points2D(pts, colors=[[255, 255, 0]], radii=[1]),
-                )
             not_failed = True
             while not_failed and sequence_id < len(episode.goals):
                 steps = 0
@@ -640,6 +632,24 @@ class HabitatMultiEvaluator:
                     self.execute_action(action)
                     if self.log_rerun:
                         self.logger.log_map()
+                        pts = []
+                        viewpts = []
+                        for obj in current_obj["goal_object"]:
+                            pt = obj["centroid"]
+                            pt = (-pt[2], -pt[0])
+                            pts.append(self.actor.mapper.one_map.metric_to_px(*pt))
+                            for v in obj['navigable_points']:
+                                vt = (-float(v[2]), -float(v[0]))
+                                viewpts.append(self.actor.mapper.one_map.metric_to_px(*vt))
+                        pts = np.array(pts)
+                        rr.log(
+                            "map/ground_truth",
+                            rr.Points2D(pts, colors=[[150, 5, 200]], radii=[2]),
+                        )
+                        rr.log(
+                            "map/ground_truth_viewpoints",
+                            rr.Points2D(viewpts, colors=[[150, 5, 170]], radii=[0.5]),
+                        )
 
                     if steps % 100 == 0:
                         dist = get_closest_dist(
@@ -817,19 +827,6 @@ class HabitatMultiEvaluator:
                             #     else " ".join(current_obj["object_category"].split('_'))
                             # )  # current_obj['language_instruction']
                             self.actor.set_query(goal_query)
-                            if self.log_rerun:
-                                pts = []
-                                for obj in current_obj["goal_object"]:
-                                    pt = obj["centroid"]
-                                    pt = (-pt[1], -pt[0])
-                                    pts.append(
-                                        self.actor.mapper.one_map.metric_to_px(*pt)
-                                    )
-                                pts = np.array(pts)
-                                rr.log(
-                                    "map/ground_truth",
-                                    rr.Points2D(pts, colors=[[255, 255, 0]], radii=[1]),
-                                )
 
             for seq_id, seq in enumerate(results[n_ep].sequence_poses):
                 np.savetxt(

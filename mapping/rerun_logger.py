@@ -28,10 +28,32 @@ def setup_blueprint_debug():
                     rrb.TextLogView(origin="object_detections"),
                     rrb.TextLogView(origin="path_updates"),
                 ),
-                rrb.Spatial2DView(origin="map",
+                rrb.Tabs(
+                    *[rrb.Spatial2DView(origin="map",
                                   name="Traversable",
                                   contents=["$origin/traversable",
-                                            "$origin/position"], ),
+                                            "$origin/position",
+                                            "$origin/proj_detect",
+                                            "$origin/agent_pos",
+                                            "$origin/path",
+                                            "$origin/ground_truth",
+                                            "$origin/ground_truth_viewpoints",], ),
+                        rrb.Spatial2DView(origin="map",
+                                  name="Obstacle",
+                                  contents=["$origin/obstacle",
+                                            "$origin/position",
+                                            "$origin/proj_detect",
+                                            "$origin/agent_pos"
+                                            "$origin/path",], ),
+                        rrb.Spatial2DView(origin="map",
+                                  name="Occluded",
+                                  contents=["$origin/occluded",
+                                            "$origin/position",
+                                            "$origin/proj_detect",
+                                            "$origin/agent_pos"
+                                            "$origin/path",], ),
+                    ],
+                ),
             ),
             rrb.Vertical(
                 rrb.Tabs(
@@ -40,9 +62,11 @@ def setup_blueprint_debug():
                                         contents=
                                         ["$origin/similarity/",
                                          "$origin/proj_detect",
+                                         "$origin/agent_pos",
                                          "$origin/frontiers",
                                          "$origin/frontiers_far",
-                                         "$origin/position"]),
+                                         "$origin/position"
+                                         "$origin/path",]),
                       rrb.Spatial2DView(origin="map",
                                         name="SimilarityTresholded",
                                         contents=
@@ -69,6 +93,7 @@ def setup_blueprint_debug():
                                                 "$origin/path",
                                                 "$origin/path_simplified",
                                                 "$origin/ground_truth",
+                                                "$origin/ground_truth_viewpoints",
                                                 "$origin/frontiers",
                                                 "$origin/frontiers_far", ]),
                     rrb.Spatial2DView(origin="map",
@@ -103,6 +128,12 @@ def setup_blueprint_debug():
                                                                               angle=rr.datatypes.Angle(
                                                                                   rad=-np.pi / 2))))
     rr.log("map/traversable", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                             rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                           angle=rr.datatypes.Angle(rad=-np.pi / 2))))
+    rr.log("map/obstacle", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                             rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                           angle=rr.datatypes.Angle(rad=-np.pi / 2))))
+    rr.log("map/occluded", rr.Transform3D(translation=np.array([0, 600, 0]),
                                              rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
                                                                            angle=rr.datatypes.Angle(rad=-np.pi / 2))))
     rr.log("map/confidence", rr.Transform3D(translation=np.array([0, 600, 0]),
@@ -144,6 +175,9 @@ def setup_blueprint_debug():
     rr.log("map/ground_truth", rr.Transform3D(translation=np.array([0, 600, 0]),
                                               rotation=rr.RotationAxisAngle(axis=[1, 0, 0],
                                                                             angle=rr.datatypes.Angle(rad=-np.pi))))
+    rr.log("map/ground_truth_viewpoints", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                              rotation=rr.RotationAxisAngle(axis=[1, 0, 0],
+                                                                            angle=rr.datatypes.Angle(rad=-np.pi))))
     rr.log("map/frontiers", rr.Transform3D(translation=np.array([0, 600, 0]),
                                            rotation=rr.RotationAxisAngle(axis=[1, 0, 0],
                                                                          angle=rr.datatypes.Angle(rad=-np.pi))))
@@ -158,7 +192,8 @@ def setup_blueprint():
                 rrb.Spatial2DView(origin="camera",
                                   name="rgb",
                                   contents=["$origin/rgb",
-                                            "$origin/detection"], ),
+                                            "$origin/detection",
+                                            "$origin/seg_mask"], ),
                 rrb.Spatial2DView(origin="camera/depth")
             ),
             rrb.Vertical(
@@ -167,7 +202,8 @@ def setup_blueprint():
                                         name="Similarity",
                                         contents=
                                         ["$origin/similarity/",
-                                         "$origin/position"]),
+                                         "$origin/position",
+                                         "$origin/agent_pos"]),
                       ],
                 ),
                 rrb.Tabs(
@@ -182,8 +218,8 @@ def setup_blueprint():
                                                 "$origin/path",
                                                 "$origin/path_simplified",
                                                 # "$origin/ground_truth",
-                                                # "$origin/frontiers",
-                                                # "$origin/frontiers_far",
+                                                "$origin/frontiers",
+                                                "$origin/frontiers_far",
                                                 ]),
                     # rrb.Spatial2DView(origin="map",
                     #                   name="Scores",
@@ -217,6 +253,12 @@ def setup_blueprint():
                                                                               angle=rr.datatypes.Angle(
                                                                                   rad=-np.pi / 2))))
     rr.log("map/traversable", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                             rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                           angle=rr.datatypes.Angle(rad=-np.pi / 2))))
+    rr.log("map/obstacle", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                             rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                           angle=rr.datatypes.Angle(rad=-np.pi / 2))))
+    rr.log("map/occluded", rr.Transform3D(translation=np.array([0, 600, 0]),
                                              rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
                                                                            angle=rr.datatypes.Angle(rad=-np.pi / 2))))
     rr.log("map/confidence", rr.Transform3D(translation=np.array([0, 600, 0]),
@@ -256,6 +298,9 @@ def setup_blueprint():
                                           rotation=rr.RotationAxisAngle(axis=[1, 0, 0],
                                                                         angle=rr.datatypes.Angle(rad=-np.pi))))
     rr.log("map/ground_truth", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                              rotation=rr.RotationAxisAngle(axis=[1, 0, 0],
+                                                                            angle=rr.datatypes.Angle(rad=-np.pi))))
+    rr.log("map/ground_truth_viewpoints", rr.Transform3D(translation=np.array([0, 600, 0]),
                                               rotation=rr.RotationAxisAngle(axis=[1, 0, 0],
                                                                             angle=rr.datatypes.Angle(rad=-np.pi))))
     rr.log("map/frontiers", rr.Transform3D(translation=np.array([0, 600, 0]),
@@ -304,7 +349,9 @@ class RerunLogger:
         # if (frontiers != 0).sum():
         #     log_map_rerun(frontiers, path="map/frontiers")
 
-        # log_map_rerun(self.mapper.value_mapper.navigable_map, path="map/traversable")
+        log_map_rerun(self.mapper.one_map.navigable_map.astype(np.uint8), path="map/traversable")
+        log_map_rerun(self.mapper.one_map.obstacle_map.cpu().numpy(), path="map/obstacle")
+        log_map_rerun(self.mapper.one_map.occluded_map.astype(np.uint8), path="map/occluded")
         log_map_rerun(explored, path="map/explored")
         log_map_rerun(similarities[0], path="map/similarity")
         # log_map_rerun(confidences, path="map/confidence")

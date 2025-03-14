@@ -238,9 +238,9 @@ class Navigator:
         :param txt: List of strings
         :return:
         """
-        for t in txt:
-            if t in self.class_map:
-                txt[txt.index(t)] = self.class_map[t]
+        # for t in txt:
+        #     if t in self.class_map:
+        #         txt[txt.index(t)] = self.class_map[t]
         if txt != self.query_text:
             print(f"Setting query to {txt}")
             self.query_text = txt
@@ -415,7 +415,7 @@ class Navigator:
             clusters = cluster_high_similarity_regions(normalized_map,
                                                        (self.one_map.confidence_map > 0.0).cpu().numpy())
             # clusters = cluster_high_similarity_regions(normalized_map, map_def > 0.0)
-            if not isinstance(clusters, np.ndarray):
+            if not isinstance(clusters, np.ndarray) and not isinstance(clusters, list):
                 for cluster in clusters:
                     cluster.compute_score(adjusted_score)
                     if len(self.blacklisted_nav_goals) == 0 or not np.any(
@@ -490,8 +490,8 @@ class Navigator:
         px, py = self.one_map.metric_to_px(x, y)
         if self.last_pose:
             if np.linalg.norm(np.array([px, py, yaw]) - np.array(self.last_pose)) < 0.01:
-                if self.path is not None:
-                    self.stuck_at_cell_counter += 1
+                # if self.path is not None:
+                self.stuck_at_cell_counter += 1
             else:
                 self.stuck_at_cell_counter = 0
         if self.stuck_at_cell_counter > 5:
@@ -578,7 +578,7 @@ class Navigator:
                         rr.log("map/proj_detect",
                                rr.Points2D(np.stack((x_id, y_id)).T, colors=[[0, 0, 255]], radii=[1]))
                         # log the segmentation mask as rgba
-                        rr.log("camera", rr.SegmentationImage(masks[0].astype(np.uint8))
+                        rr.log("camera/seg_mask", rr.SegmentationImage(masks[0].astype(np.uint8))
                                )
                     if self.consensus_filtering:
                         top_10 = np.percentile(adjusted_score[self.one_map.confidence_map > 0],

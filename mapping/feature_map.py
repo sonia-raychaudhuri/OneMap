@@ -204,6 +204,10 @@ class OneMap:
     def reset_checked_map(self):
         self.checked_map = np.zeros((self.n_cells, self.n_cells), dtype=bool)
         self.checked_conf_map = torch.zeros((self.n_cells, self.n_cells), dtype=torch.float32)
+        
+        # Reset navigable map
+        self.navigable_map = np.ones((self.n_cells, self.n_cells), dtype=bool)
+        self.occluded_map = np.zeros((self.n_cells, self.n_cells), dtype=bool)
 
     def set_camera_matrix(self,
                           camera_matrix: np.ndarray

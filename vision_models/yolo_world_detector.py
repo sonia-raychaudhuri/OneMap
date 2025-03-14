@@ -34,7 +34,8 @@ class YOLOWorldDetector:
 
         preds = {
             "boxes": [],
-            "scores": []
+            "scores": [],
+            "labels": []
         }
 
         for detection in results.predictions:
@@ -51,22 +52,44 @@ class YOLOWorldDetector:
                 if x1 != x2 and y1 != y2:
                     preds["boxes"].append([x1, y1, x2, y2])
                     preds["scores"].append(detection.confidence)
+                    preds['labels'].append(class_name)
 
         return preds
 
 if __name__ == "__main__":
+    import supervision as sv
+    from PIL import Image
+    
     # Test the YOLO World Detector
     detector = YOLOWorldDetector(confidence_threshold=0.5)
-    detector.set_classes(["person", "car", "truck", "bus", "bicycle", "motorbike", "traffic light", "stop sign"])
+    detector.set_classes(["chair"])
+
+    bounding_box_annotator = sv.BoxAnnotator()
+    label_annotator = sv.LabelAnnotator(text_position=sv.Position.CENTER)
 
     # Load an image
-    image = cv2.imread("test_images/a.jpg")
+    image = cv2.imread("/localhome/sraychau/Downloads/hssd_1.png")
 
     # Detect objects in the image
-    detections = detector.detect(image)
+    preds = detector.detect(image)
 
-    # Display the image with the detections
-    image_with_detections = detections.draw_on_image(image)
-    cv2.imshow("Detections", image_with_detections)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    if len(preds['boxes']) > 0:
+        detections = sv.Detections(
+            xyxy=np.array(preds['boxes']),
+            class_id=np.array([0]),
+            confidence=np.array(preds['scores'])
+        )
+
+        labels = [
+            f"{class_id} {confidence:0.2f}"
+            for class_id, confidence
+            in zip(detections.class_id, detections.confidence)
+        ]
+
+        image = Image.open("/localhome/sraychau/Downloads/hssd_1.png")
+        svimage = np.array(image)
+        svimage = bounding_box_annotator.annotate(svimage, detections)
+        svimage = label_annotator.annotate(svimage, detections, labels)
+        
+        sv.plot_image(svimage[:, :, ::-1])
+        Image.fromarray(svimage[:, :, :-1]).save("test_detection.jpg")

@@ -80,10 +80,11 @@ def get_closest_dist(pos, aabbs: List, is_gibson=False, is_langmon=False):
     min_dist = np.inf
     if is_langmon:
         for _goal in aabbs:
-            dx = pos[0] - _goal['centroid'][0]
-            dy = pos[1] - _goal['centroid'][2]
-            dist = np.sqrt(dx * dx + dy * dy)
-            min_dist = min(min_dist, dist)
+            for _viewpoint in _goal['navigable_points']:
+                dx = pos[0] - float(_viewpoint[0])
+                dy = pos[1] - float(_viewpoint[2])
+                dist = np.sqrt(dx * dx + dy * dy)
+                min_dist = min(min_dist, dist)
         return min_dist
     elif not is_gibson:
         for aabb in aabbs:

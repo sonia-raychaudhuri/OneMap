@@ -22,6 +22,11 @@ import numpy as np
 import torch
 
 from vision_models.clip_dense import ClipModel
+from vision_models.yolo_world_detector import YOLOWorldDetector
+import supervision as sv
+from PIL import Image
+
+from vision_models.yolov7_model import YOLOv7Detector
 
 SEQ_LEN = 3
 results_path = "results_langmon"
@@ -564,6 +569,114 @@ def evaluate_maps():
         #     gt_topdown_map,
         # )
 
+def test_similarity():
+    testing_dir = 'testing'
+    yolo_confidence = 0.5
+    clip = ClipModel("weights/clip.pth")
+    queries = [
+        'Find the beanbag chair.',
+        'Find the chair in front of the table.',
+        'Find the chair.',
+        'Find the plant.',
+        'Find the potted plant.',
+        'Find the potted plant on the table.',
+        'plant',
+        'chair',
+        'beanbag chair',
+        'table'
+    ]
+    
+    img_path = "/localhome/sraychau/Downloads/hssd_1.png"
+
+    for query in queries:
+    
+        img = Image.open(img_path).convert('RGB')
+        img_array = np.asarray(img).transpose(2,0,1)[np.newaxis, ...]
+        query_text_features = clip.get_text_features([query]).to(device)
+        image_features = clip.get_image_features(img_array).to(device)
+        similarity = clip.compute_similarity(image_features, query_text_features).detach().cpu()
+
+        print(similarity.max(), similarity.min(), similarity.mean())
+        fig, axs = plt.subplots(1, 2)
+        axs[0].imshow(similarity[0])
+        axs[1].imshow(img_array.squeeze(0).transpose(1, 2, 0))
+        axs[1].set_title(query)
+        plt.savefig(os.path.join(testing_dir, f"{query}_similarity.jpg"))
+        plt.show()
+
+        ## Yolo v7 detection
+        classes_ = [query]
+        detector = YOLOv7Detector(yolo_confidence)
+        detector.set_classes(classes_)
+
+        bounding_box_annotator = sv.BoxAnnotator()
+        label_annotator = sv.LabelAnnotator(text_position=sv.Position.CENTER)
+
+        # Load an image
+        image = cv2.imread(img_path)
+
+        # Detect objects in the image
+        preds = detector.detect(image)
+
+        if len(preds['boxes']) > 0:
+            detections = sv.Detections(
+                xyxy=np.array(preds['boxes']),
+                class_id=np.array([0]),
+                confidence=np.array(preds['scores'])
+            )
+
+            labels = [
+                f"{classes_[class_id]} {confidence:0.2f}"
+                for class_id, confidence
+                in zip(detections.class_id, detections.confidence)
+            ]
+
+            image = Image.open(img_path)
+            svimage = np.array(image)
+            svimage = bounding_box_annotator.annotate(svimage, detections)
+            svimage = label_annotator.annotate(svimage, detections, labels)
+            
+            sv.plot_image(svimage[:, :, ::-1])
+            Image.fromarray(svimage[:, :, :-1]).save(os.path.join(testing_dir, f"{query}_yolov7.jpg"))
+        else:
+            image = np.array(Image.open(img_path))
+            Image.fromarray(image[:,:,:-1]).save(os.path.join(testing_dir, f"{query}_yolov7.jpg"))
+
+        ## Yolo world detection
+        # Test the YOLO World Detector
+        detector = YOLOWorldDetector(confidence_threshold=yolo_confidence)
+        detector.set_classes(classes_)
+
+        bounding_box_annotator = sv.BoxAnnotator()
+        label_annotator = sv.LabelAnnotator(text_position=sv.Position.CENTER)
+
+        # Load an image
+        image = cv2.imread(img_path)
+
+        # Detect objects in the image
+        preds = detector.detect(image)
+
+        if len(preds['boxes']) > 0:
+            detections = sv.Detections(
+                xyxy=np.array(preds['boxes']),
+                class_id=np.array([0]),
+                confidence=np.array(preds['scores'])
+            )
+
+            labels = [
+                f"{classes_[class_id]} {confidence:0.2f}"
+                for class_id, confidence
+                in zip(detections.class_id, detections.confidence)
+            ]
+
+            image = Image.open(img_path)
+            svimage = np.array(image)
+            svimage = bounding_box_annotator.annotate(svimage, detections)
+            svimage = label_annotator.annotate(svimage, detections, labels)
+            
+            sv.plot_image(svimage[:, :, ::-1])
+            Image.fromarray(svimage[:, :, :-1]).save(os.path.join(testing_dir, f"{query}_yoloworld.jpg"))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -575,7 +688,9 @@ if __name__ == "__main__":
     parser.add_argument("--process_all_sampling", type=str, default="Y")
     args = parser.parse_args()
 
-    evaluate_maps()
+    test_similarity()
+
+    # evaluate_maps()
 
     # if args.process_all_sampling == "Y":
     #     all_sampling_methods = [

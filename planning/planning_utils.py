@@ -47,7 +47,7 @@ def compute_to_goal(start: np.ndarray, mask_coverage: np.ndarray, feasible_goal_
                              obstcl_kernel_size, min_goal_dist)
     if best_path is None or len(best_path) == 0:
         best_path = a_star_range(mask_coverage, feasible_goal_pts, tuple(start), (goal_pt[0], goal_pt[1]),
-                                 obstcl_kernel_size, min_goal_dist * 2)
+                                 obstcl_kernel_size, min_goal_dist * 3)
     if best_path and len(best_path):
         for i in range(len(best_path)):
             best_path[i] = np.array(best_path[i])
