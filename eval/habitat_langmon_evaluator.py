@@ -8,6 +8,7 @@ from onemap_utils import monochannel_to_inferno_rgb
 from eval.dataset_utils import *
 from habitat.utils.visualizations import maps
 import matplotlib.pyplot as plt
+from habitat.sims.habitat_simulator.habitat_simulator import HabitatSim
 
 # os / filsystem
 import bz2
@@ -57,7 +58,7 @@ import pickle
 # scipy
 from scipy.spatial.transform import Rotation as R
 
-SEQ_LEN = 3
+SEQ_LEN = 1
 
 
 class Result(enum.Enum):
@@ -67,6 +68,7 @@ class Result(enum.Enum):
     FAILURE_OOT = 4
     FAILURE_NOT_REACHED = 5
     FAILURE_ALL_EXPLORED = 6
+    FAILURE_EXCEPTION = 7
 
 
 class Metrics:
@@ -139,11 +141,7 @@ class HabitatMultiEvaluator:
                 if self.log_rerun
                 else None
             )
-        self.results_path = (
-            "/home/finn/active/MON/results_gibson_multi"
-            if self.is_gibson
-            else "results_langmon/"
-        )
+        self.results_path = config.results_path if len(config.results_path) > 0 else "results_langmon/"
 
         state_dir = os.path.join(self.results_path, "state")
         os.makedirs(state_dir, exist_ok=True)
@@ -151,6 +149,7 @@ class HabitatMultiEvaluator:
         os.makedirs(os.path.join(self.results_path, 'trajectories'), exist_ok=True)
         os.makedirs(os.path.join(self.results_path, 'similarities'), exist_ok=True)
         os.makedirs(os.path.join(self.results_path, 'saved_maps'), exist_ok=True)
+        os.makedirs(os.path.join(self.results_path, 'exceptions'), exist_ok=True)
 
     def load_scene(self, scene_id: str):
         if self.sim is not None:
@@ -158,6 +157,7 @@ class HabitatMultiEvaluator:
         backend_cfg = habitat_sim.SimulatorConfiguration()
         backend_cfg.scene_light_setup = habitat_sim.gfx.DEFAULT_LIGHTING_KEY
         backend_cfg.override_scene_light_defaults = True
+        backend_cfg.pbr_image_based_lighting = True
         backend_cfg.scene_id = scene_id
 
         backend_cfg.scene_dataset_config_file = (
@@ -190,6 +190,7 @@ class HabitatMultiEvaluator:
         agent_cfg.sensor_specifications = [rgb, depth]
         sim_cfg = habitat_sim.Configuration(backend_cfg, [agent_cfg])
         self.sim = habitat_sim.Simulator(sim_cfg)
+        # self.sim = HabitatSim(sim_cfg)
         # if self.scene_data[scene_id].objects_loaded:
         #     return
         # self.scene_data = HM3DDataset.load_hm3d_objects(self.scene_data, self.sim.semantic_scene.objects, scene_id)
@@ -239,19 +240,15 @@ class HabitatMultiEvaluator:
         pose_dir = os.path.join(
             os.path.abspath(os.path.join(state_dir, os.pardir)), "trajectories"
         )
-        os.makedirs(os.path.join(self.results_path, "saved_maps_gt"), exist_ok=True)
+        os.makedirs(os.path.join(path, "saved_maps_gt"), exist_ok=True)
 
         # Iterate through all files in the state directory
         data = []
         sum_successes = 0
         if data_pkl is None:
-            episodes = []
             scene_data = {}
-            valid_start_positions = {}
-            scene_floors = {}
-            scenes = {}
             episodes_json = {ep.episode_id: ep for ep in self.episodes}
-            scene_loaded = {}
+            include_scenes = [] #['102816036', '102816600', '102816756']
             for filename in sorted(os.listdir(state_dir)):
                 if filename.startswith("state_") and filename.endswith(".txt"):
                     try:
@@ -262,6 +259,9 @@ class HabitatMultiEvaluator:
 
                         # load scene
                         scene_id = experiment_num.split('__')[0]
+                        if len(include_scenes) > 0 and scene_id not in include_scenes:
+                            continue
+
                         if self.sim is None or not self.sim.curr_scene_name in scene_id:
                             self.load_scene(scene_id)
 
@@ -272,10 +272,14 @@ class HabitatMultiEvaluator:
                         # Create a row for each sequence in the experiment
 
                         for seq_num, value in enumerate(state_values):
+                            object_goals = episodes_json[experiment_num].goals[seq_num]
+                            # if object_goals["granularity"] != "detailed":
+                            #     continue
+
                             ppl = 0
                             map_size = 0
                             if value == 1:
-                                if seq_num == 2:
+                                if seq_num == self.num_seq - 1:
                                     sum_successes += 1
                                 poses = np.genfromtxt(
                                     os.path.join(
@@ -294,53 +298,77 @@ class HabitatMultiEvaluator:
                                     poses[1:, :3] - poses[:-1, :3], axis=1
                                 ).sum()
                                 # compute the optimal path length
-                                shortest_paths = [[float(p[0]), float(p[1]), float(p[2])] for p in episodes_json[experiment_num].shortest_paths[seq_num]]
-                                best_dist, _ = object_nav_gen.geodesic_distance(
-                                    self.sim, shortest_paths[0], shortest_paths[-1]
-                                )
+                                # To-Do - to be changed for goal sequence > 1, euclidean dist to be changed to geodesic
+                                if episodes_json[experiment_num].shortest_dists is None or len(episodes_json[experiment_num].shortest_dists) == 0:
+                                    if episodes_json[experiment_num].shortest_dists is None:
+                                        episodes_json[experiment_num].shortest_dists = [0 for _ in range(len(episodes_json[experiment_num].goals))]
+                                    start_pos = episodes_json[experiment_num].start_position
+                                    _g = episodes_json[experiment_num].goals[seq_num]
+                                    nearest_nav_points = []
+                                    shortest_dists = []
+                                    for _obj in _g["goal_object"]:
+                                        nearest_nav_points.append([float(_obj["nearest_nav_point"][0]), float(_obj["nearest_nav_point"][1]), float(_obj["nearest_nav_point"][2])])
+                                        # shortest_path = habitat_sim.nav.ShortestPath()
+                                        # shortest_path.requested_start = start_pos
+                                        # shortest_path.requested_end = nearest_nav_points[-1]
+                                        # sim.pathfinder.find_path(shortest_path)
+                                        # shortest_dists.append(shortest_path.geodesic_distance)
+                                        shortest_dists.append(np.linalg.norm(np.array(start_pos)-np.array(nearest_nav_points[-1]), ord=2))
+                                    shortest_dists_index = np.argmin(np.array(shortest_dists))
+                                    episodes_json[experiment_num].shortest_dists[seq_num] = shortest_dists[shortest_dists_index]
+                                    start_pos = nearest_nav_points[shortest_dists_index]
+                                
+                                best_dist = episodes_json[experiment_num].shortest_dists[seq_num]
+                                # shortest_paths = [[float(p[0]), float(p[1]), float(p[2])] for p in episodes_json[experiment_num].shortest_paths[seq_num]]
+                                # best_dist, _ = object_nav_gen.geodesic_distance(
+                                #     self.sim, shortest_paths[0], shortest_paths[-1]
+                                # )
                                 ppl = min(
                                     1.0, 1 * (best_dist / max(path_length, best_dist))
                                 )
 
                             start_position = episodes_json[experiment_num].start_position
-                            top_down_map = maps.get_topdown_map(
-                                self.sim.pathfinder,
-                                height=start_position[1],
-                                map_resolution=512,
-                                draw_border=True,
-                            )
-                            # Draw the start position
-                            top_down_map = gen_multiobject_dataset.draw_point(
-                                self.sim,
-                                top_down_map,
-                                np.array(start_position),
-                                maps.MAP_SOURCE_POINT_INDICATOR,
-                            )
+                            # top_down_map = maps.get_topdown_map(
+                            #     self.sim.pathfinder,
+                            #     height=start_position[1],
+                            #     map_resolution=512,
+                            #     draw_border=True,
+                            # )
+                            # # Draw the start position
+                            # top_down_map = gen_multiobject_dataset.draw_point(
+                            #     self.sim,
+                            #     top_down_map,
+                            #     np.array(start_position),
+                            #     maps.MAP_SOURCE_POINT_INDICATOR,
+                            # )
 
                             # Draw the object goals
-                            object_goals = episodes_json[experiment_num].goals[seq_num]
-                            _goals = object_goals['goal_object']
-                            for _g in _goals:
-                                top_down_map = gen_multiobject_dataset.draw_point(
-                                    self.sim,
-                                    top_down_map,
-                                    np.array(_g['centroid']),
-                                    maps.MAP_TARGET_POINT_INDICATOR,
-                                )
+                            # _goals = object_goals['goal_object']
+                            # for _g in _goals:
+                            #     top_down_map = gen_multiobject_dataset.draw_point(
+                            #         self.sim,
+                            #         top_down_map,
+                            #         np.array(_g['centroid']),
+                            #         maps.MAP_TARGET_POINT_INDICATOR,
+                            #     )
 
-                            # Colorize and save the map
-                            top_down_map = maps.colorize_topdown_map(top_down_map)
-                            map_size = top_down_map.shape[0] * top_down_map.shape[1]
+                            # # Colorize and save the map
+                            # top_down_map = maps.colorize_topdown_map(top_down_map)
+                            # map_size = top_down_map.shape[0] * top_down_map.shape[1]
 
-                            shortest_paths = [[float(p[0]), float(p[1]), float(p[2])] for p in episodes_json[experiment_num].shortest_paths[seq_num]]
-                            optimal_total_path_length, _ = object_nav_gen.geodesic_distance(
-                                self.sim, shortest_paths[0], shortest_paths[-1]
-                            )
-                            goal_object = (
-                                # " ".join(object_goals["object_category"].split('_'))
-                                object_goals["language_instruction"]
-                                # " ".join(object_goals["extras"]["object_category"].split("_"))
-                            )
+                            # shortest_paths = [[float(p[0]), float(p[1]), float(p[2])] for p in episodes_json[experiment_num].shortest_paths[seq_num]]
+                            # optimal_total_path_length, _ = object_nav_gen.geodesic_distance(
+                            #     self.sim, shortest_paths[0], shortest_paths[-1]
+                            # )
+                            if self.config.goal_query_type == "coarse":
+                                goal_query = "a " + " ".join(object_goals["object_category"].split('_'))
+                            elif self.config.goal_query_type == "fine":
+                                goal_query = "a " + " ".join(object_goals["extras"]["object_category"].split("_"))
+                            else:
+                                if self.config.goal_query_processing == "extract":
+                                    goal_query = object_goals['language_instruction'].split('Find ')[-1].split('Go to ')[-1].split('.')[0]
+                                else:
+                                    goal_query = object_goals['language_instruction']
                             data.append(
                                 {
                                     "experiment": experiment_num,
@@ -348,18 +376,19 @@ class HabitatMultiEvaluator:
                                     "state": value,
                                     "ppl": ppl / self.num_seq,
                                     "map_size": map_size,
-                                    "opt_path": optimal_total_path_length,
-                                    'object': goal_object,
+                                    # "opt_path": optimal_total_path_length,
+                                    'object': goal_query,
                                     "scene": episodes_json[experiment_num].scene_id,
+                                    'granularity': object_goals["granularity"]
                                 }
                             )
 
-                            np.savez_compressed(
-                                f"{self.results_path}/saved_maps_gt/{episodes_json[experiment_num].episode_id}_{seq_num}.npz",
-                                gt_topdown_map=top_down_map,
-                                gt_object_goals=object_goals,
-                                experiment_result=data,
-                            )
+                            # np.savez_compressed(
+                            #     f"{path}/saved_maps_gt/{episodes_json[experiment_num].episode_id}_{seq_num}.npz",
+                            #     gt_topdown_map=top_down_map,
+                            #     gt_object_goals=object_goals,
+                            #     experiment_result=data,
+                            # )
 
                         # deltas = poses[1:, :3] - poses[:-1, :3]
                         # distance_traveled = np.linalg.norm(deltas, axis=1).sum()
@@ -381,7 +410,11 @@ class HabitatMultiEvaluator:
             with open(data_pkl, "rb") as f:
                 data = pickle.load(f)
         # data = data[data['experiment'] < 88]
-        states = data["state"].unique()
+        # states = sorted(data["state"].unique())
+        states = sorted([r.value for r in Result])
+
+        total_episodes = len(data)
+        print(f"\nTotal experiments: {total_episodes}. Successful experiments: {sum_successes}. Failed experiments: {total_episodes-sum_successes}.")
 
         # print(sum_successes/236)
         def has_success(group, seq_id):
@@ -414,10 +447,11 @@ class HabitatMultiEvaluator:
             s = progress[progress == 1]
             result["Progress"] = progress.mean()
             result["PPL"] = ppl.mean()
-            result["opt_PL"] = group["opt_path"].mean()
+            # result["opt_PL"] = group["opt_path"].mean()
             result["Map Size"] = group["map_size"].mean() / 100
             result["success"] = s.sum() / len(progress)
             result["SPL"] = ppl[progress == 1].sum() / len(progress)
+            result["episodes"] = ','.join(group['experiment'].unique())
 
             # Calculate average SPL and multiply by 100
             # avg_spl = group['spl'].mean()
@@ -425,11 +459,64 @@ class HabitatMultiEvaluator:
 
             return result
 
+        def calculate_overall_percentages(group):
+            result = pd.Series(
+                {
+                    Result(state).name: (group["state"] == state).sum() / total_episodes
+                    for state in states
+                }
+            )
+            progress = calc_prog_per_episode(group)
+            ppl = calc_ppl_per_episode(group)
+            s = progress[progress == 1]
+            result["Progress"] = progress.mean()
+            result["PPL"] = ppl.mean()
+            # result["opt_PL"] = group["opt_path"].mean()
+            result["Map Size"] = group["map_size"].mean() / 100
+            result["success"] = s.sum() / len(progress)
+            result["SPL"] = ppl[progress == 1].sum() / len(progress)
+
+            return result
+
+        # Function to format percentages
+        def format_percentages(val):
+            return f"{val:.2%}" if isinstance(val, float) else val
+
         # Per-object results
         object_results = (
             data.groupby("object").apply(calculate_percentages).reset_index()
         )
         object_results = object_results.rename(columns={"object": "Object"})
+
+        ## Failure analysis
+        object_results_failure = object_results[
+            [
+                "Object",
+                "episodes",
+                "NO_FAILURE",
+                "FAILURE_NOT_REACHED",
+                "FAILURE_MISDETECT",
+                "FAILURE_STUCK",
+                "FAILURE_ALL_EXPLORED",
+                "FAILURE_OOT",
+            ]
+        ]
+        object_results_failure = object_results_failure.sort_values(
+            by=[
+                "FAILURE_ALL_EXPLORED",
+                "FAILURE_MISDETECT",
+                "FAILURE_STUCK",
+                "FAILURE_NOT_REACHED",
+                "FAILURE_ALL_EXPLORED",
+                "FAILURE_OOT",
+            ],
+            ascending=False,
+        )
+
+        # Per-granularity results
+        granularity_results = data.groupby("granularity").apply(calculate_percentages).reset_index()
+        granularity_results["count"] = pd.Series(data.groupby("granularity")["experiment"].agg(["count"]).reset_index()["count"])
+        granularity_results = granularity_results.sort_values(by=sort_by, ascending=False)
 
         # Per-scene results
         scene_results = data.groupby("scene").apply(calculate_percentages).reset_index()
@@ -437,23 +524,19 @@ class HabitatMultiEvaluator:
 
         # Overall results
         overall_percentages = calculate_percentages(data)
+
+        # Sorting
+        object_results = object_results.sort_values(by=sort_by, ascending=False)
         overall_row = pd.DataFrame(
             [{"Object": "Overall"} | overall_percentages.to_dict()]
         )
         object_results = pd.concat([overall_row, object_results], ignore_index=True)
 
+        scene_results = scene_results.sort_values(by=sort_by, ascending=False)
         overall_row = pd.DataFrame(
             [{"Scene": "Overall"} | overall_percentages.to_dict()]
         )
         scene_results = pd.concat([overall_row, scene_results], ignore_index=True)
-
-        # Sorting
-        object_results = object_results.sort_values(by=sort_by, ascending=False)
-        scene_results = scene_results.sort_values(by=sort_by, ascending=False)
-
-        # Function to format percentages
-        def format_percentages(val):
-            return f"{val:.2%}" if isinstance(val, float) else val
 
         # Apply formatting to all columns except the first one (Object/Scene)
         object_table = (
@@ -466,6 +549,29 @@ class HabitatMultiEvaluator:
             .to_frame()
             .join(scene_results.iloc[:, 1:].applymap(format_percentages))
         )
+
+        object_results_failure = object_results_failure.rename(columns={"FAILURE_OOT": "FAILURE_OTHER"})
+        object_failure_table = (
+                    object_results_failure.iloc[:, 0]
+                    .to_frame()
+                    .join(object_results_failure.iloc[:, 1:].applymap(format_percentages))
+                )
+        overall_episode_percentages = calculate_overall_percentages(data)
+        overall_episode_row = pd.DataFrame(
+            [{"Object": "Overall"} | overall_episode_percentages.to_dict()]
+        )
+        print(f"Failure analysis (Overall):")
+        print(tabulate(overall_episode_row, headers="keys", tablefmt="pretty", floatfmt=".2%",showindex=False))
+        print(f"Failure analysis by Object:")
+        print(tabulate(object_failure_table, headers="keys", tablefmt="pretty", floatfmt=".2%",showindex=False))
+
+        granularity_table = (
+            granularity_results.iloc[:, 0]
+            .to_frame()
+            .join(granularity_results.iloc[:, 1:].applymap(format_percentages))
+        )
+        print(f"Results by Granularity:")
+        print(tabulate(granularity_table, headers="keys", tablefmt="pretty", floatfmt=".2%"))
 
         print(f"Results by Object (sorted by {sort_by} rate, descending):")
         print(tabulate(object_table, headers="keys", tablefmt="pretty", floatfmt=".2%"))
@@ -506,6 +612,19 @@ class HabitatMultiEvaluator:
         sr_per_scene = np.mean(sr_per_scene, axis=0)
         ppl_per_scene = np.mean(ppl_per_scene, axis=0)
         print(f"PPL: {ppl_per_scene}, Success Rate: {sr_per_scene}")
+
+        episode_results = (
+            data.groupby("experiment").apply(calculate_percentages).reset_index()
+        )
+        episode_results = episode_results.rename(columns={"object": "Object"})
+        episode_table = (
+            episode_results.iloc[:, 0]
+            .to_frame()
+            .join(episode_results.iloc[:, 1:].applymap(format_percentages))
+        )
+        print(f"Overall Results by episode:")
+        print(tabulate(episode_table, headers="keys", tablefmt="pretty", floatfmt=".2%"))
+
         # Plot Success Rate
         ax1.plot(np.arange(self.num_seq), sr_per_scene, label=scene, marker="o")
 
@@ -566,15 +685,19 @@ class HabitatMultiEvaluator:
                 habitat_sim.AgentState(episode.start_position, episode.start_rotation),
             )
             self.actor.reset()
+
             sequence_id = 0
             current_obj = episode.goals[sequence_id]
-            goal_query = current_obj['language_instruction']
-            # (
-            #     " ".join(current_obj["extras"]["object_category"].split("_"))
-            #     if "extras" in current_obj
-            #     and "object_category" in current_obj["extras"]
-            #     else " ".join(current_obj["object_category"].split('_'))
-            # )
+            if self.config.goal_query_type == "coarse":
+                goal_query = "a " + " ".join(current_obj["object_category"].split('_'))
+            elif self.config.goal_query_type == "fine":
+                goal_query = "a " + " ".join(current_obj["extras"]["object_category"].split("_"))
+            else:
+                if self.config.goal_query_processing == "extract":
+                    goal_query = current_obj['language_instruction'].split('Find ')[-1].split('Go to ')[-1].split('.')[0]
+                else:
+                    goal_query = current_obj['language_instruction']
+
             self.actor.set_query(goal_query)
             not_failed = True
             while not_failed and sequence_id < len(episode.goals):
@@ -628,7 +751,19 @@ class HabitatMultiEvaluator:
                             ),
                         )
                         self.logger.log_pos(cam_x, cam_y)
-                    action, called_found = self.actor.act(observations)
+                    try:
+                        action, called_found = self.actor.act(observations)
+                    except Exception as e:
+                        print(str(e))
+                        not_failed = False
+                        running = False
+                        result = Result.FAILURE_EXCEPTION
+                        results[-1].add_sequence(np.array(poses), result, current_obj)
+                        with open(
+                            f"{self.results_path}/exceptions/{episode.episode_id}.txt", "w"
+                        ) as f:
+                            f.write(str(e))
+                        break
                     self.execute_action(action)
                     if self.log_rerun:
                         self.logger.log_map()
@@ -741,7 +876,7 @@ class HabitatMultiEvaluator:
                             center = _goal["centroid"]
                             nav_points_map = [
                                 self.actor.mapper.one_map.metric_to_px(
-                                    -float(p[1]), -float(p[0])
+                                    -float(p[2]), -float(p[0])
                                 )
                                 for p in _goal["navigable_points"]
                             ]
@@ -753,7 +888,7 @@ class HabitatMultiEvaluator:
                                     "center": center,
                                     "aabb": bbox,
                                     "center_map": self.actor.mapper.one_map.metric_to_px(
-                                        -center[1], -center[0]
+                                        -center[2], -center[0]
                                     ),
                                     "nav_points_map": nav_points_map,
                                 }
@@ -819,13 +954,15 @@ class HabitatMultiEvaluator:
                         sequence_id += 1
                         if sequence_id < len(episode.goals):
                             current_obj = episode.goals[sequence_id]
-                            goal_query = current_obj['language_instruction']
-                            # (
-                            #     " ".join(current_obj["extras"]["object_category"].split("_"))
-                            #     if "extras" in current_obj
-                            #     and "object_category" in current_obj["extras"]
-                            #     else " ".join(current_obj["object_category"].split('_'))
-                            # )  # current_obj['language_instruction']
+                            if self.config.goal_query_type == "coarse":
+                                goal_query = " ".join(current_obj["object_category"].split('_'))
+                            elif self.config.goal_query_type == "fine":
+                                goal_query = " ".join(current_obj["extras"]["object_category"].split("_"))
+                            else:                 
+                                if self.config.goal_query_processing == "extract":
+                                    goal_query = current_obj['language_instruction'].split('Find ')[-1].split('Go to ')[-1].split('.')[0]
+                                else:
+                                    goal_query = current_obj['language_instruction']
                             self.actor.set_query(goal_query)
 
             for seq_id, seq in enumerate(results[n_ep].sequence_poses):

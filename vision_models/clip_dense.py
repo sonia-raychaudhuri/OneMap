@@ -34,7 +34,7 @@ class ClipModel(torch.nn.Module, BaseModel):
         self.aug = T.ResizeShortestEdge(
             [640, 640], 2560
         )
-        self.tokenizer = open_clip.get_tokenizer('convnext_large_d_320')
+        self.tokenizer = open_clip.get_tokenizer('ViT-B-32')
         self.feature_dim = 768
         self.clip_resolution = (768, 768)
 

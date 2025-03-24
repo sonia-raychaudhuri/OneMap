@@ -17,6 +17,9 @@ class EvalConf:
     scene_path: str
     use_pointnav: bool
     square_im: bool
+    goal_query_type: str
+    goal_query_processing: str
+    results_path: str
 
 
 def load_eval_config():

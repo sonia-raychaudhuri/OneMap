@@ -28,11 +28,16 @@ from PIL import Image
 
 from vision_models.yolov7_model import YOLOv7Detector
 
-SEQ_LEN = 3
+SEQ_LEN = 1
 results_path = "results_langmon"
-object_nav_path = "datasets/langmon/minival_full/minival/"
+object_nav_path = "datasets/langmon/langmon/fphab/v0.2/minival_1on" #"datasets/langmon/minival_full/minival/"
 path_evaluation = "map_evaluation"
 device = "cuda"
+include_episodes = [
+    "106879080_174887211__4",
+    "106879005_174887124__8",
+]
+state_path = "state"
 
 
 def evaluate_maps_on_custom_prompt(args):
@@ -425,6 +430,7 @@ def evaluate_maps():
 
     generated_map_dir = os.path.join(results_path, "saved_maps")
     gt_map_dir = os.path.join(results_path, "saved_maps_gt")
+    state_dir = os.path.join(results_path, state_path)
 
     # Check if the state directory exists
     if not os.path.isdir(generated_map_dir):
@@ -437,8 +443,14 @@ def evaluate_maps():
         episodes, scene_data, object_nav_path
     )
 
+    clip = ClipModel("weights/clip.pth")
+
     # Iterate through all files in the directory
     for filename in sorted(listdir(generated_map_dir)):
+
+        experiment_num = filename[:-6]
+        if len(include_episodes) > 0 and experiment_num not in include_episodes:
+            continue
 
         # load generated maps
         map_objects = np.load(
@@ -449,16 +461,23 @@ def evaluate_maps():
         confidence_map = map_objects["confidence_map"]
         pose_observations = map_objects["pose_observations"]
         gt_goal_objects = map_objects["gt_goal_objects"]
-        query = " ".join(gt_goal_objects[0]['object_extras']['object_category'].split("_"))
+        query = str(map_objects["query"]) #" ".join(gt_goal_objects[0]['object_extras']['object_category'].split("_"))
+
+        # load states
+        with open(os.path.join(state_dir, f"state_{experiment_num}.txt"), "r") as file:
+            content = file.read().strip()
+
+        state_values = content.split(",")
+        state_values = [int(val) for val in state_values]
+        is_success = "Y" if int(state_values[0]) == 1 else "N"
+        goal_sequence = 0
 
         # load ground-truth maps
-        gt_map_objects = np.load(os.path.join(gt_map_dir, filename), allow_pickle=True)
-        gt_topdown_map = gt_map_objects["gt_topdown_map"]
-        gt_object_goals = gt_map_objects["gt_object_goals"]
-        experiment_result = gt_map_objects["experiment_result"][0]
-        is_success = "Y" if int(experiment_result["state"]) == 1 else "N"
-        goal_sequence = experiment_result["sequence"]
-        experiment_num = experiment_result["experiment"]
+        # gt_map_objects = np.load(os.path.join(gt_map_dir, filename), allow_pickle=True)
+        # gt_topdown_map = gt_map_objects["gt_topdown_map"]
+        # gt_object_goals = gt_map_objects["gt_object_goals"]
+        # experiment_result = gt_map_objects["experiment_result"][0]
+        # goal_sequence = experiment_result["sequence"]
 
         # find similarity map
         feature_map_tensor = (
@@ -468,7 +487,6 @@ def evaluate_maps():
             .permute(2, 0, 1)
             .unsqueeze(0)
         )
-        clip = ClipModel("weights/clip.pth")
         query_text_features = clip.get_text_features(["a " + query]).to(device)
         similarity = clip.compute_similarity(feature_map_tensor, query_text_features)
         # similarity[similarity<0] = 0
@@ -497,7 +515,7 @@ def evaluate_maps():
 
         ax1.plot(poses_[:, 0], poses_[:, 1], "b-")
         ax1.plot(poses_[0, 0], poses_[0, 1], "ro")
-        ax1.plot(poses_[-1, 0], poses_[-1, 1], "gs")
+        ax1.plot(poses_[-1, 0], poses_[-1, 1], "go")
 
         # u = np.diff(poses_[:, 0])
         # v = np.diff(poses_[:, 1])
@@ -507,8 +525,11 @@ def evaluate_maps():
         # ax1.quiver(pos_x, pos_y, u/norm, v/norm, angles="xy", zorder=5, pivot="mid")
 
         obj_locs = np.array([go["center_map"] for go in gt_goal_objects])
-        for obj in obj_locs:
+        obj_viewpts = np.array([go["nav_points_map"] for go in gt_goal_objects])
+        for i, obj in enumerate(obj_locs):
             ax1.plot(obj[0], obj[1], "g*")
+            for obj in obj_viewpts[i]:
+                ax1.plot(obj[0], obj[1], "g.")
 
         # Set equal aspect ratio to ensure accurate positions
         ax1.axis("equal")
@@ -542,14 +563,14 @@ def evaluate_maps():
         os.makedirs(eval_dir, exist_ok=True)
         # Save the plot as SVG
         plt.savefig(
-            f"{results_path}/{path_evaluation}/{filename[:-4]}_{query}_sim_map.svg",
+            f"{results_path}/{path_evaluation}/{is_success}_{experiment_num}_{query}_sim_map.svg",
             format="svg",
             dpi=300,
             bbox_inches="tight",
         )
 
         # cv2.imwrite(
-        #     f"{results_path}/{path_evaluation}/{filename[:-4]}_sim_map.png",
+        #     f"{results_path}/{path_evaluation}/{experiment_num}_sim_map.png",
         #     final_sim_img,
         # )
 
@@ -565,7 +586,7 @@ def evaluate_maps():
         #     lineType=cv2.LINE_AA,
         # )
         # cv2.imwrite(
-        #     f"{results_path}/{path_evaluation}/{filename[:-4]}_gt_map.png",
+        #     f"{results_path}/{path_evaluation}/{experiment_num}_gt_map.png",
         #     gt_topdown_map,
         # )
 
@@ -688,9 +709,9 @@ if __name__ == "__main__":
     parser.add_argument("--process_all_sampling", type=str, default="Y")
     args = parser.parse_args()
 
-    test_similarity()
+    # test_similarity()
 
-    # evaluate_maps()
+    evaluate_maps()
 
     # if args.process_all_sampling == "Y":
     #     all_sampling_methods = [

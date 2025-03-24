@@ -122,7 +122,7 @@ class MONActor(Actor):
                     return_act['continuous']['angular'] = ang
                     return return_act, obj_found
             else:
-                return_act['discrete'] = 'move_forward'
+                return_act['discrete'] = np.random.choice(['move_forward','turn_left','turn_right'])
             return return_act, False
 
 
