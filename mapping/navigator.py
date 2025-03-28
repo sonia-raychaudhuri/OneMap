@@ -242,10 +242,17 @@ class Navigator:
         #     if t in self.class_map:
         #         txt[txt.index(t)] = self.class_map[t]
         if txt != self.query_text:
-            print(f"Setting query to {txt}")
-            self.query_text = txt
-            self.query_text_features = self.model.get_text_features(["a " + self.query_text[0]]).to(
-                self.one_map.map_device)
+            if len(txt) > 1:
+                self.query_text = txt    # set the query to be the supported/main object
+                print(f"Setting query to {self.query_text}")
+                self.query_text_features = self.model.get_text_features(txt).to(
+                    self.one_map.map_device)
+            else:
+                print(f"Setting query to {txt}")
+                self.query_text = txt
+                self.query_text_features = self.model.get_text_features([self.query_text[0]]).to(
+                    self.one_map.map_device)
+                
             self.previous_sims = None
             self.one_map.reset_checked_map()
             self.detector.set_classes(self.query_text)
@@ -567,10 +574,10 @@ class Navigator:
                     x_rot += odometry[0, 3]
                     y_rot += odometry[1, 3]
 
-                    x_id = ((x_rot / self.one_map.cell_size)).astype(np.uint32) + \
-                           self.one_map.map_center_cells[0].item()
-                    y_id = ((y_rot / self.one_map.cell_size)).astype(np.uint32) + \
-                           self.one_map.map_center_cells[1].item()
+                    x_id = np.clip(((x_rot / self.one_map.cell_size)).astype(np.uint32) + \
+                           self.one_map.map_center_cells[0].item(), a_min=0, a_max=self.one_map.n_cells-1)
+                    y_id = np.clip(((y_rot / self.one_map.cell_size)).astype(np.uint32) + \
+                           self.one_map.map_center_cells[1].item(), a_min=0, a_max=self.one_map.n_cells-1)
 
                     object_valid = True
                     adjusted_score = self.previous_sims[0].cpu().numpy() + 1.0  # only positive scores

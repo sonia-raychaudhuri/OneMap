@@ -35,6 +35,10 @@ class Actor(ABC):
     def set_query(self, query: str):
         pass
 
+    @abstractmethod
+    def set_exploit(self):
+        pass
+
 
 class MONActor(Actor):
     def __init__(self, config):
@@ -51,7 +55,7 @@ class MONActor(Actor):
 
         self.mapper = Navigator(model, detector, config)
 
-        self.init = 36*2
+        self.init = 12*2
         hfov = 90 if self.square else 97
         res_x = 640
         res_y = 640 if self.square else 480
@@ -128,7 +132,13 @@ class MONActor(Actor):
 
     def reset(self):
         self.mapper.reset()
-        self.init = 36*2
+        self.init = 12*2
 
     def set_query(self, query: str):
         self.mapper.set_query([query])
+        
+    def set_queries(self, queries: list[str]):
+        self.mapper.set_query(queries)
+
+    def set_exploit(self):
+        self.mapper.set_exploit()

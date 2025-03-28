@@ -226,10 +226,11 @@ class HabitatMultiEvaluator:
             self.sim.get_agent(0).set_state(agent_state)
             self.sim.step_physics(self.time_step)
 
-    def read_results(self, path, sort_by, data_pkl=None):
+    def read_results(self, sort_by, data_pkl=None):
         from eval.dataset_utils import gen_multiobject_dataset
         from eval.dataset_utils.object_nav_utils import object_nav_gen
 
+        path = self.results_path
         state_dir = os.path.join(path, "state")
         state_results = {}
 
@@ -273,7 +274,8 @@ class HabitatMultiEvaluator:
 
                         for seq_num, value in enumerate(state_values):
                             object_goals = episodes_json[experiment_num].goals[seq_num]
-                            # if object_goals["granularity"] != "detailed":
+                            # if not (object_goals["granularity"] == "detailed" and object_goals["spatial_rel"] == "on"):
+                            # # if not (object_goals["granularity"] == "coarse"):
                             #     continue
 
                             ppl = 0
@@ -693,12 +695,18 @@ class HabitatMultiEvaluator:
             elif self.config.goal_query_type == "fine":
                 goal_query = "a " + " ".join(current_obj["extras"]["object_category"].split("_"))
             else:
-                if self.config.goal_query_processing == "extract":
+                if self.config.goal_query_processing == "extract" or self.config.goal_query_processing == "extract_and_split_support":
                     goal_query = current_obj['language_instruction'].split('Find ')[-1].split('Go to ')[-1].split('.')[0]
+                elif self.config.goal_query_processing == "extract_no_support":
+                    goal_query = current_obj['language_instruction'].split('Find ')[-1].split('Go to ')[-1].split('.')[0].split(' on the ')[0]
                 else:
                     goal_query = current_obj['language_instruction']
 
-            self.actor.set_query(goal_query)
+            if self.config.goal_query_type == "detailed" and self.config.goal_query_processing == "extract_and_split_support":
+                goal_query = goal_query.split(' on ')
+                self.actor.set_queries(goal_query)
+            else:
+                self.actor.set_query(goal_query)
             not_failed = True
             while not_failed and sequence_id < len(episode.goals):
                 steps = 0
@@ -751,19 +759,19 @@ class HabitatMultiEvaluator:
                             ),
                         )
                         self.logger.log_pos(cam_x, cam_y)
-                    try:
-                        action, called_found = self.actor.act(observations)
-                    except Exception as e:
-                        print(str(e))
-                        not_failed = False
-                        running = False
-                        result = Result.FAILURE_EXCEPTION
-                        results[-1].add_sequence(np.array(poses), result, current_obj)
-                        with open(
-                            f"{self.results_path}/exceptions/{episode.episode_id}.txt", "w"
-                        ) as f:
-                            f.write(str(e))
-                        break
+                    # try:
+                    action, called_found = self.actor.act(observations)
+                    # except Exception as e:
+                    #     print(str(e))
+                    #     not_failed = False
+                    #     running = False
+                    #     result = Result.FAILURE_EXCEPTION
+                    #     results[-1].add_sequence(np.array(poses), result, current_obj)
+                    #     with open(
+                    #         f"{self.results_path}/exceptions/{episode.episode_id}.txt", "w"
+                    #     ) as f:
+                    #         f.write(str(e))
+                    #     break
                     self.execute_action(action)
                     if self.log_rerun:
                         self.logger.log_map()
@@ -955,15 +963,22 @@ class HabitatMultiEvaluator:
                         if sequence_id < len(episode.goals):
                             current_obj = episode.goals[sequence_id]
                             if self.config.goal_query_type == "coarse":
-                                goal_query = " ".join(current_obj["object_category"].split('_'))
+                                goal_query = "a " + " ".join(current_obj["object_category"].split('_'))
                             elif self.config.goal_query_type == "fine":
-                                goal_query = " ".join(current_obj["extras"]["object_category"].split("_"))
-                            else:                 
+                                goal_query = "a " + " ".join(current_obj["extras"]["object_category"].split("_"))
+                            else:
                                 if self.config.goal_query_processing == "extract":
                                     goal_query = current_obj['language_instruction'].split('Find ')[-1].split('Go to ')[-1].split('.')[0]
+                                elif self.config.goal_query_processing == "extract_no_support":
+                                    goal_query = current_obj['language_instruction'].split('Find ')[-1].split('Go to ')[-1].split('.')[0].split(' on the ')[0]
                                 else:
                                     goal_query = current_obj['language_instruction']
-                            self.actor.set_query(goal_query)
+
+                            if self.config.goal_query_type == "detailed" and self.config.goal_query_processing == "extract_and_split_support":
+                                goal_query = goal_query.split(' on the ')
+                                self.actor.set_queries(goal_query)
+                            else:
+                                self.actor.set_query(goal_query)
 
             for seq_id, seq in enumerate(results[n_ep].sequence_poses):
                 np.savetxt(

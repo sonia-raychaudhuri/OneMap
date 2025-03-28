@@ -84,9 +84,13 @@ class ClipModel(torch.nn.Module, BaseModel):
         # print(image_feats.max())
         # print(text_feats.max())
         if len(image_feats.shape) == 3:
-            return torch.einsum('bcx, bc -> bx', image_feats, text_feats)
+            similarity = torch.einsum('bcx, bc -> bx', image_feats, text_feats)
+            similarity = torch.sum(similarity, axis=0).unsqueeze(0)
+            return similarity
         else:
-            return torch.einsum('bchw, bc -> bhw', image_feats, text_feats)
+            similarity = torch.einsum('bchw, bc -> bhw', image_feats, text_feats)
+            similarity = torch.sum(similarity, axis=0).unsqueeze(0)
+            return similarity
 
     # def forward(self, images: np.ndarray):
     #    return self.image_forward_torch(images)

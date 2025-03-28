@@ -5,6 +5,7 @@ EvalConf:
   is_gibson: False
   object_nav_path: "datasets/langmon/langmon/fphab/v0.2/minival_1on"
   scene_path: "datasets/scene_datasets/fphab/"
+  results_path: "results_langmon/"
   log_rerun: False
   use_pointnav: False
   square_im: True

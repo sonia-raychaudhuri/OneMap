@@ -82,9 +82,16 @@ class HabitatController(Controller):
             # find closest point on path
             distances = np.linalg.norm(path - pos[:2].T, axis=1)
             next_id = np.argmin(distances)
+            while distances[next_id] < 0.1:
+                distances = np.delete(distances, next_id)
+                path = np.delete(path, next_id, axis=0)
+                if len(distances) == 0:
+                    return np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0])
+                
+                next_id = np.argmin(distances)
 
-            next_id += 1
-            next_id = min(next_id, path.shape[0] - 1)
+            # next_id += 1
+            # next_id = min(next_id, path.shape[0] - 1)
             next_pos = path[next_id]
             # determine action
             if own_update:

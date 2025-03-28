@@ -14,4 +14,4 @@ MappingConf: # [all in feature_map.py]
   obstacle_max: 0.5
   filter_stairs: True
   floor_level: -0.88
-  floor_threshold: -1.1
+  floor_threshold: -1.7

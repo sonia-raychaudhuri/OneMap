@@ -3,6 +3,7 @@ from config import load_eval_config
 #from eval configimport MONActor
 from eval.habitat_evaluator import Result
 import pickle
+from eval.actor import MONActor
 
 def main():
     import os
@@ -13,7 +14,7 @@ def main():
     # data = evaluator.read_results('/home/finn/active/MON/results_vlfm/', "opt_PL", os.path.join("./", 'vlfm.pkl'))
     # pickle_path = os.path.join("./", 'vlfm.pkl')
     # data = evaluator.read_results('results_multi/', "s",  os.path.join("./", 'multi.pkl'))
-    data = evaluator.read_results('results_langmon/', sort_by="success")
+    data = evaluator.read_results(sort_by="success")
     # pickle_path = os.path.join("./", 'multi_noGlasses.pkl')
     # with open(pickle_path, 'wb') as f:
     #     pickle.dump(data, f)
