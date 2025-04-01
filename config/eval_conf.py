@@ -20,6 +20,8 @@ class EvalConf:
     goal_query_type: str
     goal_query_processing: str
     results_path: str
+    max_explore_steps: int = 0
+    save_video: bool = False
 
 
 def load_eval_config():

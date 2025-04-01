@@ -153,6 +153,7 @@ class Navigator:
         self.nav_goals = []
         self.blacklisted_nav_goals = []
         self.artificial_obstacles = []
+        self.detections = {}
 
         self.last_nav_goal = None
         self.last_pose = None
@@ -171,6 +172,7 @@ class Navigator:
         self.initializing = True
         self.stuck_at_nav_goal_counter = 0
         self.stuck_at_cell_counter = 0
+        self.enable_exploit = False
 
         self.percentile_exploitation = config.planner.percentile_exploitation
         self.frontier_depth = int(config.planner.frontier_depth / self.one_map.cell_size)
@@ -224,6 +226,7 @@ class Navigator:
         self.nav_goals = []
         self.blacklisted_nav_goals = []
         self.artificial_obstacles = []
+        self.enable_exploit = False
 
     def set_camera_matrix(self,
                           camera_matrix: np.ndarray
@@ -258,6 +261,9 @@ class Navigator:
             self.detector.set_classes(self.query_text)
             self.object_detected = False
             self.get_map(False)
+    
+    def set_exploit(self) -> None:
+        self.enable_exploit = True
 
     def get_path(self
                  ) -> Union[np.ndarray, str]:
@@ -278,7 +284,7 @@ class Navigator:
         :return:
         """
         self.path_id = 0
-        if not self.object_detected:
+        if not self.object_detected and not self.enable_exploit:
             # We are exploring
             if len(self.nav_goals) == 0:
                 if not self.initializing:
@@ -524,6 +530,7 @@ class Navigator:
         # TODO I think yolo wants rgb
         # detections = self.detector.detect(np.flip(image.transpose(1, 2, 0), axis=-1))
         detections = self.detector.detect(image.transpose(1, 2, 0))
+        self.detections = detections
         a = time.time()
         image_features = self.model.get_image_features(image[np.newaxis, ...]).squeeze(0)
         b = time.time()
@@ -640,16 +647,20 @@ class Navigator:
         elif not self.object_detected:
             self.chosen_detection = None
             self.object_detected = False
-        if not self.object_detected:
+        if not self.object_detected and not self.enable_exploit:
             if self.saw_left:
                 self.cyclic_detect_checker.add_state_action(np.array([px, py]), "L")
             elif self.saw_right:
                 self.cyclic_detect_checker.add_state_action(np.array([px, py]), "R")
         self.compute_frontiers_and_POIs(*self.one_map.metric_to_px(odometry[0, 3], odometry[1, 3]))
         e = time.time()
-        if self.log:
-            adjusted_score = self.previous_sims[0].cpu().numpy() + 1.0  # only positive scores
+        
+        adjusted_score = self.previous_sims[0].cpu().numpy() + 1.0  # only positive scores
+        if self.enable_exploit:
+            goal_w_highest_score = np.unravel_index(np.argmax(adjusted_score), adjusted_score.shape)
+            self.chosen_detection = (goal_w_highest_score[0], goal_w_highest_score[1])
 
+        if self.log:
             top_10 = np.percentile(adjusted_score[self.one_map.confidence_map > 0],
                                    self.percentile_exploitation)
             top_map = (adjusted_score > top_10).astype(np.uint8)
@@ -658,7 +669,7 @@ class Navigator:
             log_map_rerun(top_map, path="map/similarity_th")
         # Compute the new path
         # TODO Make the thresholds and distances to object a parameter
-        if self.object_detected:
+        if self.object_detected and not self.enable_exploit:
             if np.linalg.norm(start - self.chosen_detection) <= self.max_detect_distance:
                 self.object_detected = False
                 return True
@@ -673,8 +684,13 @@ class Navigator:
                 if not top_map[self.chosen_detection[0], self.chosen_detection[1]]:
                     self.object_detected = False
                     rr.log("path_updates", rr.TextLog("Current path lost similarity."))
-        if self.allow_replan:
+        if self.allow_replan or self.enable_exploit:
             self.compute_best_path(start)
+        if self.enable_exploit:
+            if self.path is not None and len(self.path) < 3:
+                return True
+            if np.linalg.norm(start - self.chosen_detection) <= self.max_detect_distance:
+                return True
         if self.object_detected and len(self.path) < 3:
             self.object_detected = False
             return True
