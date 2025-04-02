@@ -22,6 +22,7 @@ class EvalConf:
     results_path: str
     max_explore_steps: int = 0
     save_video: bool = False
+    num_seq: int = 1
 
 
 def load_eval_config():
