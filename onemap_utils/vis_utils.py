@@ -221,6 +221,30 @@ def add_sim_maps_to_image(observation: Dict, maps: Dict=None, info: Dict=None, t
                 interpolation=cv2.INTER_CUBIC,
             )
             render_frame = np.concatenate((render_frame, _image), axis=1)
+        if "traversable_map" in maps:
+            _image = maps["traversable_map"]
+            old_h, old_w, _ = _image.shape
+            img_height = render_frame.shape[0]
+            img_width = int(float(img_height) / old_h * old_w)
+            # cv2 resize (dsize is width first)
+            _image = cv2.resize(
+                _image,
+                (img_width, img_height),
+                interpolation=cv2.INTER_CUBIC,
+            )
+            render_frame = np.concatenate((render_frame, _image), axis=1)
+        if "explored_map" in maps:
+            _image = maps["explored_map"]
+            old_h, old_w, _ = _image.shape
+            img_height = render_frame.shape[0]
+            img_width = int(float(img_height) / old_h * old_w)
+            # cv2 resize (dsize is width first)
+            _image = cv2.resize(
+                _image,
+                (img_width, img_height),
+                interpolation=cv2.INTER_CUBIC,
+            )
+            render_frame = np.concatenate((render_frame, _image), axis=1)
 
     ## append text
     if len(text_to_append) > 0:
