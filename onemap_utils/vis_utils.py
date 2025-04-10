@@ -286,30 +286,78 @@ def add_sim_maps_to_image(observation: Dict, maps: Dict=None, info: Dict=None, t
                     lineType=cv2.LINE_AA,
                 )
                 render_frame = np.concatenate((render_frame, _image), axis=1)
-        if "traversable_map" in maps:
-            _image = maps["traversable_map"]
-            old_h, old_w, _ = _image.shape
-            img_height = render_frame.shape[0]
-            img_width = int(float(img_height) / old_h * old_w)
-            # cv2 resize (dsize is width first)
-            _image = cv2.resize(
-                _image,
-                (img_width, img_height),
-                interpolation=cv2.INTER_CUBIC,
-            )
-            render_frame = np.concatenate((render_frame, _image), axis=1)
-        if "explored_map" in maps:
-            _image = maps["explored_map"]
-            old_h, old_w, _ = _image.shape
-            img_height = render_frame.shape[0]
-            img_width = int(float(img_height) / old_h * old_w)
-            # cv2 resize (dsize is width first)
-            _image = cv2.resize(
-                _image,
-                (img_width, img_height),
-                interpolation=cv2.INTER_CUBIC,
-            )
-            render_frame = np.concatenate((render_frame, _image), axis=1)
+        
+        next_layer_frames = []
+        if "obstcl_map_layers" in maps:
+            if "traversable_map" in maps:
+                _image = maps["traversable_map"]
+                old_h, old_w, _ = _image.shape
+                img_height = render_frame.shape[0]
+                img_width = int(float(img_height) / old_h * old_w)
+                # cv2 resize (dsize is width first)
+                _image = cv2.resize(
+                    _image,
+                    (img_width, img_height),
+                    interpolation=cv2.INTER_CUBIC,
+                )
+                cv2.putText(
+                    _image,
+                    f"navigable map",
+                    (img_width-200, img_height-50),
+                    font,
+                    font_size,
+                    (0, 0, 0),
+                    font_thickness,
+                    lineType=cv2.LINE_AA,
+                )
+                next_layer_frames.append(_image)
+
+            _images = maps["obstcl_map_layers"]
+            font_size = 1.5
+            font_thickness = 2
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            for i, _image in enumerate(_images):
+                old_h, old_w, _ = _image.shape
+                img_height = render_frame.shape[0]
+                img_width = int(float(img_height) / old_h * old_w)
+                # cv2 resize (dsize is width first)
+                _image = cv2.resize(
+                    _image,
+                    (img_width, img_height),
+                    interpolation=cv2.INTER_CUBIC,
+                )
+                cv2.putText(
+                    _image,
+                    f"layer {i}",
+                    (img_width-200, img_height-50),
+                    font,
+                    font_size,
+                    (250, 250, 250),
+                    font_thickness,
+                    lineType=cv2.LINE_AA,
+                )
+                next_layer_frames.append(_image)
+
+            shapes_are_equal = len(set(x.shape for x in next_layer_frames)) == 1
+            if not shapes_are_equal:
+                render_frame_next = tile_images(next_layer_frames)
+            else:
+                render_frame_next = np.concatenate(next_layer_frames, axis=1)
+
+            render_frame = np.concatenate((render_frame, render_frame_next), axis=0)
+        else:
+            if "traversable_map" in maps:
+                _image = maps["traversable_map"]
+                old_h, old_w, _ = _image.shape
+                img_height = render_frame.shape[0]
+                img_width = int(float(img_height) / old_h * old_w)
+                # cv2 resize (dsize is width first)
+                _image = cv2.resize(
+                    _image,
+                    (img_width, img_height),
+                    interpolation=cv2.INTER_CUBIC,
+                )
+                render_frame = np.concatenate((render_frame, _image), axis=1)
 
     ## append text
     if len(text_to_append) > 0:

@@ -72,6 +72,7 @@ class OneMap:
     feature_map: torch.Tensor  # map where first dimension is x direction, second dimension is y, and last direction is
     # feature_dim
     obstacle_map: torch.Tensor  # map where first dimension is x direction, second dimension is y, and last direction is
+    obstacle_map_layered: torch.Tensor
     # obstacle likelihood
     navigable_map: np.ndarray  # binary traversability map where first dimension is x direction, second dimension is y
     # navigable likelihood
@@ -114,7 +115,10 @@ class OneMap:
         self.layered = config.layered
         self.z_bins_lower, self.z_bins_upper, self.z_bins_step = config.z_bins_lower, config.z_bins_upper, config.z_bins_step
         self.z_bins = torch.arange(self.z_bins_lower, self.z_bins_upper, config.z_bins_step).to("cuda")
-        self.n_layers = len(self.z_bins) + 1
+        if self.layered:
+            self.n_layers = len(self.z_bins) + 1
+        else:
+            self.n_layers = 0
         self.map_center_cells = self.map_center_cells = torch.tensor([self.n_cells // 2, self.n_cells // 2],
                                                                      dtype=torch.int32).to("cuda")
         self.size = config.size
@@ -127,6 +131,8 @@ class OneMap:
         self.feature_map = self.feature_map.to(self.map_device)
 
         self.obstacle_map = torch.zeros((self.n_cells, self.n_cells), dtype=torch.float32)
+        if self.layered:
+            self.obstacle_map_layered = torch.zeros((self.n_cells, self.n_cells, self.n_layers), dtype=torch.float32)
         self.agent_radius = config.agent_radius
         col_kernel_size = self.n_cells / self.size * self.agent_radius
         col_kernel_size = int(col_kernel_size) + (int(col_kernel_size) % 2 == 0)
@@ -136,7 +142,6 @@ class OneMap:
 
         self.fully_explored_map = np.zeros((self.n_cells, self.n_cells), dtype=bool)
         self.checked_map = np.zeros((self.n_cells, self.n_cells), dtype=bool)
-
         if self.layered:
             self.confidence_map_feats = torch.zeros((self.n_cells, self.n_cells, self.n_layers), dtype=torch.float32).to(self.map_device)
         self.confidence_map = torch.zeros((self.n_cells, self.n_cells), dtype=torch.float32)
@@ -144,7 +149,10 @@ class OneMap:
         self.checked_conf_map = torch.zeros((self.n_cells, self.n_cells), dtype=torch.float32)
         self.checked_conf_map = self.checked_conf_map.to(self.map_device)
 
-        self.updated_mask = torch.zeros((self.n_cells, self.n_cells), dtype=torch.bool).to(self.map_device)
+        if self.layered:
+            self.updated_mask = torch.zeros((self.n_cells, self.n_cells, self.n_layers), dtype=torch.bool).to(self.map_device)
+        else:
+            self.updated_mask = torch.zeros((self.n_cells, self.n_cells), dtype=torch.bool).to(self.map_device)
 
         self.fx = None
         self.fy = None
@@ -190,6 +198,8 @@ class OneMap:
 
         # Reset obstacle map
         self.obstacle_map = torch.zeros((self.n_cells, self.n_cells), dtype=torch.float32).to(self.map_device)
+        if self.layered:
+            self.obstacle_map_layered = torch.zeros((self.n_cells, self.n_cells, self.n_layers), dtype=torch.float32).to(self.map_device)
 
         # Reset navigable map
         self.navigable_map = np.ones((self.n_cells, self.n_cells), dtype=bool)
@@ -210,19 +220,25 @@ class OneMap:
         self.checked_conf_map = torch.zeros((self.n_cells, self.n_cells), dtype=torch.float32).to(self.map_device)
 
         # Reset updated mask
-        self.updated_mask = torch.zeros((self.n_cells, self.n_cells), dtype=torch.bool).to(self.map_device)
+        if self.layered:
+            self.updated_mask = torch.zeros((self.n_cells, self.n_cells, self.n_layers), dtype=torch.bool).to(self.map_device)
+        else:
+            self.updated_mask = torch.zeros((self.n_cells, self.n_cells), dtype=torch.bool).to(self.map_device)
 
         # Reset iteration counter
         self._iters = 0
         self.agent_height_0 = None
 
     def reset_updated_mask(self):
-        self.updated_mask = torch.zeros((self.n_cells, self.n_cells), dtype=torch.bool).to(self.map_device)
+        if self.layered:
+            self.updated_mask = torch.zeros((self.n_cells, self.n_cells, self.n_layers), dtype=torch.bool).to(self.map_device)
+        else:
+            self.updated_mask = torch.zeros((self.n_cells, self.n_cells), dtype=torch.bool).to(self.map_device)
 
     def reset_checked_map(self):
         self.checked_map = np.zeros((self.n_cells, self.n_cells), dtype=bool)
         self.checked_conf_map = torch.zeros((self.n_cells, self.n_cells), dtype=torch.float32)
-        
+
         # Reset navigable map
         # self.navigable_map = np.ones((self.n_cells, self.n_cells), dtype=bool)
         # self.occluded_map = np.zeros((self.n_cells, self.n_cells), dtype=bool)
@@ -268,7 +284,7 @@ class OneMap:
         elif len(values.shape) == 3:
             values = values.permute(1, 2, 0)  # feature_dim last for convenience
             if self.layered:
-                (confidences_mapped, values_mapped,
+                (confidences_mapped, values_mapped, 
                 obstacle_mapped, obstcl_confidence_mapped) = self.project_dense_layered(values, torch.Tensor(depth).to("cuda"),
                                                                                 torch.tensor(tf_camera_to_episodic),
                                                                                 self.fx, self.fy,
@@ -305,24 +321,27 @@ class OneMap:
             confs_new = confidences_mapped.values().data.squeeze()
             confs_old = self.confidence_map_feats[indices[0], indices[1], indices[2]]
 
+            confs_old_obs = self.confidence_map[indices_obstacle[0], indices_obstacle[1]]
+
             confidence_denominator = confs_new + confs_old
             weight_1 = torch.nan_to_num(confs_old / confidence_denominator)
             weight_2 = torch.nan_to_num(confs_new / confidence_denominator)
 
-            self.updated_mask[indices[0], indices[1]] = True
+            self.updated_mask[indices[0], indices[1], :] = True
 
-            self.feature_map[indices[0], indices[1], indices[2]] = self.feature_map[indices[0], indices[1], indices[2]] * weight_1.unsqueeze(-1) + \
-                                                    values_mapped.values().data * weight_2.unsqueeze(-1)
+            self.feature_map[indices[0], indices[1], indices[2], :] = self.feature_map[indices[0], indices[1], indices[2], :] * weight_1.unsqueeze(-1) + \
+                                                       values_mapped.values().data * weight_2.unsqueeze(-1)
+            self.obstacle_map_layered[indices[0], indices[1], indices[2]] = 1
+
             self.confidence_map_feats[indices[0], indices[1], indices[2]] = confidence_denominator
 
             # we also need to update the checked confidence
-            confs_new = obstcl_confidence_mapped.values().data.squeeze()
-            confs_old_checked = self.checked_conf_map[indices_obstacle[0], indices_obstacle[1]]
+            confs_old_checked = self.checked_conf_map[indices[0], indices[1]]
             confidence_denominator_checked = confs_new + confs_old_checked
-            self.checked_conf_map[indices_obstacle[0], indices_obstacle[1]] = confidence_denominator_checked
+            self.checked_conf_map[indices[0], indices[1]] = confidence_denominator_checked
 
-            confs_old_obs = self.confidence_map[indices_obstacle[0], indices_obstacle[1]]
             # Obstacle Map update
+            confs_new = obstcl_confidence_mapped.values().data.squeeze()
             confidence_denominator = confs_new + confs_old_obs
             weight_1 = torch.nan_to_num(confs_old_obs / confidence_denominator)
             weight_2 = torch.nan_to_num(confs_new / confidence_denominator)
@@ -331,6 +350,7 @@ class OneMap:
                                                                               indices_obstacle[0], indices_obstacle[
                                                                                   1]] * weight_1 + \
                                                                           obstacle_mapped.values().data.squeeze() * weight_2
+
             self.confidence_map[indices_obstacle[0], indices_obstacle[1]] = confidence_denominator
 
             self.occluded_map = (self.obstacle_map > self.obstacle_map_threshold).cpu().numpy()
@@ -340,13 +360,12 @@ class OneMap:
             self.navigable_map = 1 - cv2.dilate((self.occluded_map).astype(np.uint8),
                                                 self.navigable_kernel, iterations=1).astype(bool)
 
-
             self.fully_explored_map = (np.nan_to_num(1.0 / self.confidence_map.cpu().numpy())
                                        < self.fully_explored_threshold)
 
             self.checked_map = (np.nan_to_num(1.0 / self.checked_conf_map.cpu().numpy())
                                 < self.checked_map_threshold)
-            
+
     def fuse_maps(self,
                   confidences_mapped: torch.Tensor,
                   values_mapped: torch.Tensor,
@@ -407,7 +426,6 @@ class OneMap:
                     self.occluded_map[obs[0], obs[1]] = True
             self.navigable_map = 1 - cv2.dilate((self.occluded_map).astype(np.uint8),
                                                 self.navigable_kernel, iterations=1).astype(bool)
-
 
             self.fully_explored_map = (np.nan_to_num(1.0 / self.confidence_map.cpu().numpy())
                                        < self.fully_explored_threshold)
@@ -558,7 +576,6 @@ class OneMap:
         scores_mapped /= sums_per_cell
         obstcl_confidence_mapped = scores_mapped
 
-
         # Get all the ids that are affected by the kernel (depth noise blurring)
         ids = pcl_grid_ids_masked_unique
         all_ids_ = torch.zeros((2, ids.shape[1], self.kernel_size, self.kernel_size), device="cuda")
@@ -573,7 +590,6 @@ class OneMap:
 
         # And the depth noise
         depth_noise = torch.sqrt(torch.sum(depths ** 2, dim=0)) * self.depth_factor / self.cell_size
-
 
         # Compute the sum for each kernel centered around a grid cell
         kernel_sums = gaussian_kernel_sum(self.kernel_components_sum, depth_noise).unsqueeze(-1)  # all unique ids
@@ -699,50 +715,43 @@ class OneMap:
 
         rotated_pcl = rotate_pcl(projected_depth, tf_camera_to_episodic)
         cam_x, cam_y, cam_z = tf_camera_to_episodic[:3, 3] / tf_camera_to_episodic[3, 3]
-        rotated_pcl[:, :2] += torch.tensor([cam_x, cam_y], device='cuda')
+        rotated_pcl[:, :3] += torch.tensor([cam_x, cam_y, cam_z], device='cuda')
 
         values_aligned = values.reshape((-1, values.shape[-1]))
 
-        pcl_grid_ids = rotated_pcl[:, :3]
-        pcl_grid_ids[:, :2] = torch.floor(pcl_grid_ids[:, :2] / self.cell_size).to(torch.int32)
+        pcl_grid_ids = torch.floor(rotated_pcl[:, :2].clone() / self.cell_size).to(torch.int32)
         pcl_grid_ids[:, 0] += self.map_center_cells[0]
         pcl_grid_ids[:, 1] += self.map_center_cells[1]
-        pcl_grid_ids[:, 2] = torch.bucketize(rotated_pcl[:, 2], boundaries=self.z_bins)
 
-        pcl_grid_ids_2d = pcl_grid_ids[:, :2].clone()
+        # layered grid
+        layered_pcl_grid_ids = rotated_pcl[:, :3].clone()
+        layered_pcl_grid_ids[:, :2] = torch.floor(layered_pcl_grid_ids[:, :2] / self.cell_size).to(torch.int32)
+        layered_pcl_grid_ids[:, 0] += self.map_center_cells[0]
+        layered_pcl_grid_ids[:, 1] += self.map_center_cells[1]
+        layered_pcl_grid_ids[:, 2] = torch.bucketize(rotated_pcl[:, 2], boundaries=self.z_bins)
 
         # Filter valid updates
         mask = (depth_aligned.flatten() != float('inf')) & (depth_aligned.flatten() != 0) & (pcl_grid_ids[:, 0] >= self.kernel_half + 1) & (
                 pcl_grid_ids[:, 0] < self.n_cells - self.kernel_half - 1) & (
                        pcl_grid_ids[:, 1] >= self.kernel_half + 1) & (
                        pcl_grid_ids[:, 1] < self.n_cells - self.kernel_half - 1)  # for value map
-        mask_2d = (depth_aligned.flatten() != float('inf')) & (depth_aligned.flatten() != 0) & (pcl_grid_ids_2d[:, 0] >= self.kernel_half + 1) & (
-                    pcl_grid_ids_2d[:, 0] < self.n_cells - self.kernel_half - 1) & (
-                       pcl_grid_ids_2d[:, 1] >= self.kernel_half + 1) & (
-                       pcl_grid_ids_2d[:, 1] < self.n_cells - self.kernel_half - 1)  # for obstacle map
         if hole_mask.nelement() == 0:
-            # mask_obstacle = mask & (((rotated_pcl[:, 2]> self.obstacle_min) & (
-            #                              rotated_pcl[:, 2]  < self.obstacle_max)) )
-            mask_obstacle_2d = mask_2d & (((rotated_pcl[:, 2] > self.obstacle_min) & (
-                    rotated_pcl[:, 2] < self.obstacle_max)))
+            mask_obstacle = mask & (((rotated_pcl[:, 2]> self.obstacle_min) & (
+                                         rotated_pcl[:, 2]  < self.obstacle_max)) )
         else:
-            # mask_obstacle = mask & (((rotated_pcl[:, 2] > self.obstacle_min) & (
-            #         rotated_pcl[:, 2] < self.obstacle_max)) | hole_mask)
-            mask_obstacle_2d = mask_2d & (((rotated_pcl[:, 2] > self.obstacle_min) & (
+            mask_obstacle = mask & (((rotated_pcl[:, 2] > self.obstacle_min) & (
                     rotated_pcl[:, 2] < self.obstacle_max)) | hole_mask)
-            
         mask &= (scores_aligned > 1e-5)
+        mask_obstacle_masked = mask_obstacle[mask]
         scores_masked = scores_aligned[mask]
-
-        mask_obstacle_masked = mask_obstacle_2d[mask_2d]
-        scores_masked_2d = scores_aligned[mask_2d]
-        pcl_grid_ids_masked_2d = pcl_grid_ids_2d[mask_2d].T
 
         pcl_grid_ids_masked = pcl_grid_ids[mask].T
         values_to_add = values_aligned[mask] * scores_masked.unsqueeze(1)
+        layered_pcl_grid_ids_masked = layered_pcl_grid_ids[mask].T
 
         combined_data = torch.cat((
             values_to_add,
+            mask_obstacle_masked.unsqueeze(1),
             torch.ones((values_to_add.shape[0], 1), dtype=torch.uint8, device="cuda"),
             scores_masked.unsqueeze(1),
             ),
@@ -757,44 +766,43 @@ class OneMap:
 
         # Extract the data
         data_dim = combined_data.shape[-1]
+        obstacle_mapped = coalesced_combined_data[:, data_dim - 3]
         scores_mapped = coalesced_combined_data[:, data_dim - 1].unsqueeze(1)
         sums_per_cell = coalesced_combined_data[:, data_dim - 2].unsqueeze(1)
-        new_map = coalesced_combined_data[:, :data_dim - 2]
+        new_map = coalesced_combined_data[:, :data_dim - 3]
 
         # Normalize (from sum to mean)
         new_map /= scores_mapped
         scores_mapped /= sums_per_cell
-
-        ## preparing 2d obstacle map
-        combined_data_2d = torch.cat((
-            mask_obstacle_masked.unsqueeze(1),
-            torch.ones((mask_obstacle_masked.shape[0], 1), dtype=torch.uint8, device="cuda"),
-            scores_masked_2d.unsqueeze(1),
-            ),
-            dim=1)  # prepare to aggregate doubles (values pointing to the same grid cell)
-
-        # define the map from unique ids to all ids
-        pcl_grid_ids_masked_unique_2d, pcl_mapping_2d = pcl_grid_ids_masked_2d.unique(dim=1, return_inverse=True)
-        # coalesce the data
-        coalesced_combined_data_2d = torch.zeros((pcl_grid_ids_masked_unique_2d.shape[1], combined_data_2d.shape[-1]),
-                                              dtype=torch.float32, device="cuda")
-        coalesced_combined_data_2d.index_add_(0, pcl_mapping_2d, combined_data_2d)
-
-        obstacle_mapped = coalesced_combined_data_2d[:, 0]
-        sums_per_cell_2d = coalesced_combined_data_2d[:, 1].unsqueeze(1)
-        scores_mapped_2d = coalesced_combined_data_2d[:, 2].unsqueeze(1)
-
-        # Normalize (from sum to mean)
-        scores_mapped_2d /= sums_per_cell_2d
-        obstcl_confidence_mapped = scores_mapped_2d
+        obstcl_confidence_mapped = scores_mapped
 
         # Get all the ids that are affected by the kernel (depth noise blurring)
         ids = pcl_grid_ids_masked_unique
-        all_ids_ = torch.zeros((3, ids.shape[1], self.kernel_size, self.kernel_size), device="cuda")
+        all_ids_ = torch.zeros((2, ids.shape[1], self.kernel_size, self.kernel_size), device="cuda")
         all_ids_[0] = (ids[0].unsqueeze(-1).unsqueeze(-1) + self.kernel_ids_x)
         all_ids_[1] = (ids[1].unsqueeze(-1).unsqueeze(-1) + self.kernel_ids_y)
-        all_ids_[2] = ids[2].unsqueeze(-1).unsqueeze(-1)
-        all_ids, mapping = all_ids_.reshape(3, -1).unique(dim=1, return_inverse=True)
+        all_ids, mapping = all_ids_.reshape(2, -1).unique(dim=1, return_inverse=True)
+
+        ## layered ids
+        pcl_grid_ids_masked_unique_layered, pcl_mapping_layered = layered_pcl_grid_ids_masked.unique(dim=1, return_inverse=True)
+        coalesced_combined_data_layered = torch.zeros((pcl_grid_ids_masked_unique_layered.shape[1], combined_data.shape[-1]),
+                                              dtype=torch.float32, device="cuda")
+        coalesced_combined_data_layered.index_add_(0, pcl_mapping_layered, combined_data)
+
+        # obstacle_mapped_layered = coalesced_combined_data_layered[:, data_dim - 3]
+        scores_mapped_layered = coalesced_combined_data_layered[:, data_dim - 1].unsqueeze(1)
+        sums_per_cell_layered = coalesced_combined_data_layered[:, data_dim - 2].unsqueeze(1)
+        new_map_layered = coalesced_combined_data_layered[:, :data_dim - 3]
+
+        new_map_layered /= scores_mapped_layered
+        scores_mapped_layered /= sums_per_cell_layered
+
+        ids_layered = pcl_grid_ids_masked_unique_layered
+        all_ids_layered_ = torch.zeros((3, ids_layered.shape[1], self.kernel_size, self.kernel_size), device="cuda")
+        all_ids_layered_[0] = (ids_layered[0].unsqueeze(-1).unsqueeze(-1) + self.kernel_ids_x)
+        all_ids_layered_[1] = (ids_layered[1].unsqueeze(-1).unsqueeze(-1) + self.kernel_ids_y)
+        all_ids_layered_[2] = ids_layered[2].unsqueeze(-1).unsqueeze(-1)
+        all_ids_layered, mapping_layered = all_ids_layered_.reshape(3, -1).unique(dim=1, return_inverse=True)
 
         # Compute the corresponding depths
         depths = ((all_ids[:2] - self.map_center_cells.unsqueeze(1)) * self.cell_size - torch.tensor([cam_x, cam_y],
@@ -803,7 +811,6 @@ class OneMap:
 
         # And the depth noise
         depth_noise = torch.sqrt(torch.sum(depths ** 2, dim=0)) * self.depth_factor / self.cell_size
-
 
         # Compute the sum for each kernel centered around a grid cell
         kernel_sums = gaussian_kernel_sum(self.kernel_components_sum, depth_noise).unsqueeze(-1)  # all unique ids
@@ -827,16 +834,60 @@ class OneMap:
         coalesced_map_data /= kernel_sums
         coalesced_scores /= kernel_sums
 
-        # Compute the obstacle map
-        obstacle_mapped = (obstacle_mapped > 0).to(torch.float32)
+        # Compute the corresponding depths
+        layered_centers = torch.tensor([self.map_center_cells[0], self.map_center_cells[1], 0], device="cuda", dtype=torch.uint32)
+        depths = ((all_ids_layered - layered_centers.unsqueeze(1)) * self.cell_size - torch.tensor([cam_x, cam_y, cam_z],
+                                                                                 dtype=torch.float32, device="cuda")
+                  .unsqueeze(1))
 
-        obstacle_mapped = torch.sparse_coo_tensor(pcl_grid_ids_masked_unique_2d, obstacle_mapped.unsqueeze(1), (self.n_cells, self.n_cells, 1), is_coalesced=True).cpu()
-        obstcl_confidence_mapped = torch.sparse_coo_tensor(pcl_grid_ids_masked_unique_2d, obstcl_confidence_mapped, (self.n_cells, self.n_cells, 1), is_coalesced=True).cpu()
-        # print("Updating with sparse matrix of size {}x{} with {} non-zero elements, resulting size is {} Mb".format(
-        #     self.n_cells, self.n_cells, new_map.values().shape[0] * self.feature_dim,
-        #                                 new_map.element_size() * new_map.values().shape[
-        #                                     0] * self.feature_dim / 1024 / 1024))
-        return torch.sparse_coo_tensor(all_ids, coalesced_scores, (self.n_cells, self.n_cells, self.n_layers, 1), is_coalesced=True).cpu(), torch.sparse_coo_tensor(all_ids, coalesced_map_data, (self.n_cells, self.n_cells, self.n_layers, self.feature_dim), is_coalesced=True).cpu(), obstacle_mapped.cpu(), obstcl_confidence_mapped.cpu()
+        # And the depth noise
+        depth_noise = torch.sqrt(torch.sum(depths ** 2, dim=0)) * self.depth_factor / self.cell_size
+
+        # Compute the sum for each kernel centered around a grid cell
+        kernel_sums = gaussian_kernel_sum(self.kernel_components_sum, depth_noise).unsqueeze(-1)  # all unique ids
+
+        # remap the depths to all the id's to kernels centered around the original points in ids and
+        # compute the sparse inverse kernel elements
+        kernels = compute_gaussian_kernel_components(self.kernel_components, depth_noise[mapping_layered].reshape(-1,
+                                                                                  self.kernel_size, self.kernel_size))
+
+        ## layered map
+        coalesced_map_data_layered = torch.zeros((all_ids_layered.shape[1], self.feature_dim), dtype=torch.float32, device="cuda")
+        coalesced_scores_layered = torch.zeros((all_ids_layered.shape[1], 1), dtype=torch.float32, device="cuda")
+        # Compute the blurred map and blurred scores
+        coalesced_map_data_layered.index_add_(0, mapping_layered, (kernels.unsqueeze(-1) *
+                                                   new_map_layered.unsqueeze(1).unsqueeze(1)).reshape(-1, self.feature_dim))
+        coalesced_scores_layered.index_add_(0, mapping_layered, (kernels * scores_mapped_layered.unsqueeze(1)).reshape(-1, 1))
+
+        # Free up memory to avoid OOM
+        torch.cuda.empty_cache()
+
+        # Normalize the map and scores
+        coalesced_map_data_layered /= kernel_sums
+        coalesced_scores_layered /= kernel_sums
+
+        # Compute the obstacle map
+        obstacle_mapped[:] = (obstacle_mapped > 0).to(torch.float32)
+
+        obstacle_mapped = torch.sparse_coo_tensor(pcl_grid_ids_masked_unique, obstacle_mapped.unsqueeze(1), (self.n_cells, self.n_cells, 1), is_coalesced=True).cpu()
+        obstcl_confidence_mapped = torch.sparse_coo_tensor(pcl_grid_ids_masked_unique, obstcl_confidence_mapped, (self.n_cells, self.n_cells, 1), is_coalesced=True).cpu()
+
+        return (
+            torch.sparse_coo_tensor(
+                all_ids_layered,
+                coalesced_scores_layered,
+                (self.n_cells, self.n_cells, self.n_layers, 1),
+                is_coalesced=True,
+            ).cpu(),
+            torch.sparse_coo_tensor(
+                all_ids_layered,
+                coalesced_map_data_layered,
+                (self.n_cells, self.n_cells, self.n_layers, self.feature_dim),
+                is_coalesced=True,
+            ).cpu(),
+            obstacle_mapped.cpu(),
+            obstcl_confidence_mapped.cpu(),
+        )
 
     def project_single(self,
                        values: torch.Tensor,

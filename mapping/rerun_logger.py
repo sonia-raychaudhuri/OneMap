@@ -46,6 +46,27 @@ def setup_blueprint_debug():
                                             "$origin/agent_pos"
                                             "$origin/path",], ),
                         rrb.Spatial2DView(origin="map",
+                                            name="Obstacle",
+                                  contents=["$origin/obstacle/layer1",
+                                            "$origin/position",
+                                            "$origin/proj_detect",
+                                            "$origin/agent_pos"
+                                            "$origin/path",]),
+                        rrb.Spatial2DView(origin="map",
+                                            name="Obstacle",
+                                  contents=["$origin/obstacle/layer2",
+                                            "$origin/position",
+                                            "$origin/proj_detect",
+                                            "$origin/agent_pos"
+                                            "$origin/path",]),
+                        rrb.Spatial2DView(origin="map",
+                                            name="Obstacle",
+                                  contents=["$origin/obstacle/layer3",
+                                            "$origin/position",
+                                            "$origin/proj_detect",
+                                            "$origin/agent_pos"
+                                            "$origin/path",]),
+                        rrb.Spatial2DView(origin="map",
                                   name="Occluded",
                                   contents=["$origin/occluded",
                                             "$origin/position",
@@ -164,6 +185,15 @@ def setup_blueprint_debug():
                                              rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
                                                                            angle=rr.datatypes.Angle(rad=-np.pi / 2))))
     rr.log("map/obstacle", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                             rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                           angle=rr.datatypes.Angle(rad=-np.pi / 2))))
+    rr.log("map/obstacle/layer1", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                             rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                           angle=rr.datatypes.Angle(rad=-np.pi / 2))))
+    rr.log("map/obstacle/layer2", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                             rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                           angle=rr.datatypes.Angle(rad=-np.pi / 2))))
+    rr.log("map/obstacle/layer3", rr.Transform3D(translation=np.array([0, 600, 0]),
                                              rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
                                                                            angle=rr.datatypes.Angle(rad=-np.pi / 2))))
     rr.log("map/occluded", rr.Transform3D(translation=np.array([0, 600, 0]),
@@ -324,6 +354,15 @@ def setup_blueprint():
     rr.log("map/obstacle", rr.Transform3D(translation=np.array([0, 600, 0]),
                                              rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
                                                                            angle=rr.datatypes.Angle(rad=-np.pi / 2))))
+    rr.log("map/obstacle/layer1", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                             rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                           angle=rr.datatypes.Angle(rad=-np.pi / 2))))
+    rr.log("map/obstacle/layer2", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                             rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                           angle=rr.datatypes.Angle(rad=-np.pi / 2))))
+    rr.log("map/obstacle/layer3", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                             rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                           angle=rr.datatypes.Angle(rad=-np.pi / 2))))
     rr.log("map/occluded", rr.Transform3D(translation=np.array([0, 600, 0]),
                                              rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
                                                                            angle=rr.datatypes.Angle(rad=-np.pi / 2))))
@@ -433,6 +472,15 @@ class RerunLogger:
         else:
             similarities = (similarities + 1.0) / 2.0
             log_map_rerun(similarities[0], path="map/similarity")
+
+        obstacles_layered = self.mapper.one_map.obstacle_map_layered.cpu().numpy()
+        if len(obstacles_layered.shape) > 2 and obstacles_layered.shape[-1] > 1:
+            # show 3 layers at most for now
+            for i in range(3):
+                if i >= obstacles_layered.shape[-1]:
+                    break
+                log_map_rerun(obstacles_layered[:,:,i], path=f"map/obstacle/layer{i+1}")
+
         # log_map_rerun(confidences, path="map/confidence")
 
     def log_pos(self, x, y):

@@ -10,8 +10,8 @@ MappingConf: # [all in feature_map.py]
   gradient_factor: 0.2
   optimal_object_distance: 1.0
   optimal_object_factor: 1.5
-  obstacle_min: -0.6
+  obstacle_min: -1.4
   obstacle_max: 0.5
   filter_stairs: True
-  floor_level: -0.88
+  floor_level: -1.5 #-0.88
   floor_threshold: -1.7

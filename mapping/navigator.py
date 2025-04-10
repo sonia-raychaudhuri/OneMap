@@ -738,10 +738,7 @@ class Navigator:
             else:
                 return
         if self.previous_sims is not None:
-            if self.one_map.layered:
-                map_features = map_features[mask, :, :].permute(2, 0, 1).unsqueeze(0)
-            else:
-                map_features = map_features[mask, :].permute(1, 0).unsqueeze(0)
+            map_features = map_features[mask, :].permute(1, 0).unsqueeze(0)
         else:
             if self.one_map.layered:
                 map_features = map_features.permute(3, 0, 1, 2).unsqueeze(0)
