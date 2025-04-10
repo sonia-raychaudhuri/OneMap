@@ -68,6 +68,27 @@ def setup_blueprint_debug():
                                          "$origin/position"
                                          "$origin/path",]),
                       rrb.Spatial2DView(origin="map",
+                                        name="SimilarityLayer1",
+                                        contents=
+                                        ["$origin/similarity/layer1",
+                                         "$origin/proj_detect",
+                                         "$origin/agent_pos",
+                                         "$origin/position"]),
+                      rrb.Spatial2DView(origin="map",
+                                        name="SimilarityLayer2",
+                                        contents=
+                                        ["$origin/similarity/layer2",
+                                         "$origin/proj_detect",
+                                         "$origin/agent_pos",
+                                         "$origin/position"]),
+                      rrb.Spatial2DView(origin="map",
+                                        name="SimilarityLayer3",
+                                        contents=
+                                        ["$origin/similarity/layer3",
+                                         "$origin/proj_detect",
+                                         "$origin/agent_pos",
+                                         "$origin/position"]),
+                      rrb.Spatial2DView(origin="map",
                                         name="SimilarityTresholded",
                                         contents=
                                         ["$origin/similarity_th/",
@@ -116,6 +137,18 @@ def setup_blueprint_debug():
     )
     rr.send_blueprint(my_blueprint)
     rr.log("map/similarity", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                            rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                          angle=rr.datatypes.Angle(
+                                                                              rad=-np.pi / 2))))
+    rr.log("map/similarity/layer1", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                            rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                          angle=rr.datatypes.Angle(
+                                                                              rad=-np.pi / 2))))
+    rr.log("map/similarity/layer2", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                            rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                          angle=rr.datatypes.Angle(
+                                                                              rad=-np.pi / 2))))
+    rr.log("map/similarity/layer3", rr.Transform3D(translation=np.array([0, 600, 0]),
                                             rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
                                                                           angle=rr.datatypes.Angle(
                                                                               rad=-np.pi / 2))))
@@ -204,6 +237,27 @@ def setup_blueprint():
                                         ["$origin/similarity/",
                                          "$origin/position",
                                          "$origin/agent_pos"]),
+                      rrb.Spatial2DView(origin="map",
+                                        name="SimilarityLayer1",
+                                        contents=
+                                        ["$origin/similarity/layer1",
+                                         "$origin/proj_detect",
+                                         "$origin/agent_pos",
+                                         "$origin/position"]),
+                      rrb.Spatial2DView(origin="map",
+                                        name="SimilarityLayer2",
+                                        contents=
+                                        ["$origin/similarity/layer2",
+                                         "$origin/proj_detect",
+                                         "$origin/agent_pos",
+                                         "$origin/position"]),
+                      rrb.Spatial2DView(origin="map",
+                                        name="SimilarityLayer3",
+                                        contents=
+                                        ["$origin/similarity/layer3",
+                                         "$origin/proj_detect",
+                                         "$origin/agent_pos",
+                                         "$origin/position"]),
                       ],
                 ),
                 rrb.Tabs(
@@ -241,6 +295,18 @@ def setup_blueprint():
     )
     rr.send_blueprint(my_blueprint)
     rr.log("map/similarity", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                            rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                          angle=rr.datatypes.Angle(
+                                                                              rad=-np.pi / 2))))
+    rr.log("map/similarity/layer1", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                            rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                          angle=rr.datatypes.Angle(
+                                                                              rad=-np.pi / 2))))
+    rr.log("map/similarity/layer2", rr.Transform3D(translation=np.array([0, 600, 0]),
+                                            rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
+                                                                          angle=rr.datatypes.Angle(
+                                                                              rad=-np.pi / 2))))
+    rr.log("map/similarity/layer3", rr.Transform3D(translation=np.array([0, 600, 0]),
                                             rotation=rr.RotationAxisAngle(axis=[0, 0, 1],
                                                                           angle=rr.datatypes.Angle(
                                                                               rad=-np.pi / 2))))
@@ -336,8 +402,6 @@ class RerunLogger:
 
     def log_map(self):
         confidences = self.mapper.get_confidence_map()
-        similarities = (self.mapper.get_map() + 1.0) / 2.0
-
         explored = (self.mapper.one_map.navigable_map == 1).astype(np.float32) * 0.1
         explored[confidences > 0] = 0.5
         explored[self.mapper.one_map.fully_explored_map] = 1.0
@@ -353,7 +417,22 @@ class RerunLogger:
         log_map_rerun(self.mapper.one_map.obstacle_map.cpu().numpy(), path="map/obstacle")
         log_map_rerun(self.mapper.one_map.occluded_map.astype(np.uint8), path="map/occluded")
         log_map_rerun(explored, path="map/explored")
-        log_map_rerun(similarities[0], path="map/similarity")
+
+        similarities = self.mapper.get_map()
+        if len(similarities.shape) > 3 and similarities.shape[-1] > 1:
+            similarities = similarities[0]
+            # show 3 layers at most for now
+            for i in range(3):
+                if i >= similarities.shape[-1]:
+                    break
+                sim = (similarities[:,:,i] + 1.0) / 2.0
+                log_map_rerun(sim, path=f"map/similarity/layer{i+1}")
+            aggregated_sim = np.sum(similarities, axis=-1)
+            aggregated_sim = (aggregated_sim + 1.0) / 2.0
+            log_map_rerun(aggregated_sim, path="map/similarity")
+        else:
+            similarities = (similarities + 1.0) / 2.0
+            log_map_rerun(similarities[0], path="map/similarity")
         # log_map_rerun(confidences, path="map/confidence")
 
     def log_pos(self, x, y):

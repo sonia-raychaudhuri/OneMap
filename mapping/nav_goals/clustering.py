@@ -49,9 +49,12 @@ class Cluster(NavGoal):
     def get_descr_point(self):
         return self.center
 
-    def compute_score(self, score_map):
+    def compute_score(self, score_map, n_layers: int = 0):
         # score is the max score in the cluster
-        self.cluster_score = np.max(score_map[self.points[:, 0], self.points[:, 1]])
+        if n_layers > 1:
+            self.cluster_score = np.max(score_map[self.points[:, 0], self.points[:, 1], self.points[:, 2]])
+        else:
+            self.cluster_score = np.max(score_map[self.points[:, 0], self.points[:, 1]])
 
 
 # Include the previous clustering functions here
@@ -65,7 +68,8 @@ def cluster_high_similarity_regions(
         mask: np.ndarray,
         neighborhood_size: int = 10,
         min_cluster_size: int = 2,
-        relative_threshold: float = 0.8
+        relative_threshold: float = 0.8,
+        n_layers: int = 0
 ) -> List[Cluster]:
     # Find local maxima
     # blur the similarity map
@@ -112,7 +116,10 @@ def cluster_high_similarity_regions(
                     max_similarity_point = current
 
                 # Add neighbors to stack
-                neighbors = np.array([(current[0] + dx, current[1] + dy) for dx in [-1, 0, 1] for dy in [-1, 0, 1]])
+                if n_layers > 1:
+                    neighbors = np.array([(current[0] + dx, current[1] + dy, current[2]) for dx in [-1, 0, 1] for dy in [-1, 0, 1]])
+                else:
+                    neighbors = np.array([(current[0] + dx, current[1] + dy) for dx in [-1, 0, 1] for dy in [-1, 0, 1]])
                 valid_neighbors = (neighbors[:, 0] >= 0) & (neighbors[:, 0] < similarity_map.shape[0]) & \
                                   (neighbors[:, 1] >= 0) & (neighbors[:, 1] < similarity_map.shape[1])
                 for v in neighbors[valid_neighbors]:
@@ -121,7 +128,7 @@ def cluster_high_similarity_regions(
         if len(cluster_points) >= min_cluster_size:
             cluster_points = np.array(cluster_points)
             # Set center as the point with maximum similarity
-            center = np.array(max_similarity_point)
+            center = np.array(max_similarity_point[:2])
             clusters.append(Cluster(center=center, points=cluster_points, cluster_score=cluster_score))
 
     return clusters

@@ -365,7 +365,7 @@ class Navigator:
                     if self.path is not None:
                         if len(self.path) < 5 and self.last_pose[0] == start[0] and self.last_pose[1] == start[1]:
                             self.stuck_at_nav_goal_counter += 1
-            if self.stuck_at_nav_goal_counter > 10:
+            if self.stuck_at_nav_goal_counter > 5:
                 # We probably are trying to reach an unreachable goal, for instance a frontier to the void in habitat
                 self.blacklisted_nav_goals.append(best_nav_goal.get_descr_point())
                 if self.log:
@@ -425,12 +425,15 @@ class Navigator:
             map_def = self.previous_sims[0].numpy()
             normalized_map = (map_def - map_def.min()) / (map_def.max() - map_def.min())
             # TODO This will give us wrong cluster scores, we will need to adjust this to match the frontier scores!
+            conf_map_mask = (self.one_map.confidence_map > 0.0).cpu().numpy()
+            if self.one_map.layered:
+                conf_map_mask = (self.one_map.confidence_map_feats > 0.0).cpu().numpy()
             clusters = cluster_high_similarity_regions(normalized_map,
-                                                       (self.one_map.confidence_map > 0.0).cpu().numpy())
+                                                       conf_map_mask, n_layers=self.one_map.n_layers)
             # clusters = cluster_high_similarity_regions(normalized_map, map_def > 0.0)
             if not isinstance(clusters, np.ndarray) and not isinstance(clusters, list):
                 for cluster in clusters:
-                    cluster.compute_score(adjusted_score)
+                    cluster.compute_score(adjusted_score, n_layers=self.one_map.n_layers)
                     if len(self.blacklisted_nav_goals) == 0 or not np.any(
                             np.all(cluster.get_descr_point() == self.blacklisted_nav_goals, axis=1)):
                         if ((largest_contour is None or cv2.pointPolygonTest(largest_contour, cluster.center.astype(float),
@@ -448,6 +451,8 @@ class Navigator:
                         cluster_pts = cluster.points
                         score = (cluster.get_score() - min_c) / (max_c - min_c)
                         cluster_max_similarity[cluster_pts[:, 0], cluster_pts[:, 1]] = score
+                    if len(cluster_max_similarity.shape) > 2:
+                        cluster_max_similarity = np.sum(cluster_max_similarity, axis=-1)
                     log_map_rerun(cluster_max_similarity, path="map/similarity_th2")
 
             if self.log:
@@ -545,6 +550,8 @@ class Navigator:
         if self.first_obs:
             self.one_map.confidence_map[px - 10:px + 10, py - 10:py + 10] += 10
             self.one_map.checked_conf_map[px - 10:px + 10, py - 10:py + 10] += 10
+            if self.one_map.layered:
+                self.one_map.confidence_map_feats[px - 10:px + 10, py - 10:py + 10, :] += 10
             self.first_obs = False
         # if detections.class_id.shape[0] > 0:
         last_saw_left = self.saw_left
@@ -588,6 +595,8 @@ class Navigator:
 
                     object_valid = True
                     adjusted_score = self.previous_sims[0].cpu().numpy() + 1.0  # only positive scores
+                    # if len(adjusted_score.shape) > 2:
+                    #         adjusted_score = np.sum(adjusted_score, axis=-1).astype(np.uint8)
                     if self.log:
                         rr.log("map/proj_detect",
                                rr.Points2D(np.stack((x_id, y_id)).T, colors=[[0, 0, 255]], radii=[1]))
@@ -595,12 +604,18 @@ class Navigator:
                         rr.log("camera/seg_mask", rr.SegmentationImage(masks[0].astype(np.uint8))
                                )
                     if self.consensus_filtering:
-                        top_10 = np.percentile(adjusted_score[self.one_map.confidence_map > 0],
+                        conf_feats = (self.one_map.confidence_map > 0)
+                        if self.one_map.layered:
+                            conf_feats = (self.one_map.confidence_map_feats > 0)
+                        top_10 = np.percentile(adjusted_score[conf_feats],
                                                self.percentile_exploitation)
                         top_map = (adjusted_score > top_10).astype(np.uint8)
-
                         print(top_10)
-                        top_map[self.one_map.confidence_map == 0] = 0
+                        if self.one_map.layered:
+                            top_map[self.one_map.confidence_map_feats == 0] = 0
+                            top_map = np.sum(top_map, axis=-1).astype(np.uint8)
+                        else:
+                            top_map[self.one_map.confidence_map == 0] = 0
                         k = np.ones((7, 7), np.uint8)
                         top_map = cv2.dilate(top_map, k, iterations=1)
                         # log_map_rerun((adjusted_score > 1.0).astype(np.float32), path="map/similarity_th")
@@ -610,15 +625,15 @@ class Navigator:
 
                         if object_valid:
                             mask = top_map_projections
-                            x_masked = x_id[mask == 1]
-                            y_masked = y_id[mask == 1]
-                            depths_masked = depths[mask == 1]
+                            x_masked = x_id[mask > 0]
+                            y_masked = y_id[mask > 0]
+                            depths_masked = depths[mask > 0]
                             best = np.argmin(depths_masked)
 
                             if self.object_detected and object_valid:
                                 # we already have a goal point and will only update if the current one is better
-                                if adjusted_score[x_masked[best], y_masked[best]] < \
-                                        adjusted_score[self.chosen_detection[0], self.chosen_detection[1]] * 1.1:
+                                if np.max(adjusted_score[x_masked[best], y_masked[best]]) < \
+                                        np.max(adjusted_score[self.chosen_detection[0], self.chosen_detection[1]]) * 1.1:
                                     object_valid = False
                             if object_valid:
                                 # self.object_detected = True
@@ -626,8 +641,8 @@ class Navigator:
                     else:
                         best = np.argmin(depths)
                         if self.object_detected:
-                            if adjusted_score[x_id[best], y_id[best]] < \
-                                    adjusted_score[self.chosen_detection[0], self.chosen_detection[1]] * 1.1:
+                            if np.max(adjusted_score[x_id[best], y_id[best]]) < \
+                                    np.max(adjusted_score[self.chosen_detection[0], self.chosen_detection[1]]) * 1.1:
                                 object_valid = False
                         if object_valid:
                             self.chosen_detection = (x_id[best], y_id[best])
@@ -661,9 +676,14 @@ class Navigator:
             self.chosen_detection = (goal_w_highest_score[0], goal_w_highest_score[1])
 
         if self.log:
-            top_10 = np.percentile(adjusted_score[self.one_map.confidence_map > 0],
-                                   self.percentile_exploitation)
+            conf_feats = (self.one_map.confidence_map > 0)
+            if self.one_map.layered:
+                conf_feats = (self.one_map.confidence_map_feats > 0)
+            top_10 = np.percentile(adjusted_score[conf_feats],
+                                    self.percentile_exploitation)
             top_map = (adjusted_score > top_10).astype(np.uint8)
+            if self.one_map.layered:
+                top_map = np.sum(top_map, axis=-1).astype(np.uint8)
             k = np.ones((3, 3), np.uint8)
             top_map = cv2.dilate(top_map, k, iterations=1)
             log_map_rerun(top_map, path="map/similarity_th")
@@ -676,9 +696,14 @@ class Navigator:
             if self.consensus_filtering and self.object_detected:
                 adjusted_score = self.previous_sims[0].cpu().numpy() + 1.0  # only positive scores
 
-                top_10 = np.percentile(adjusted_score[self.one_map.confidence_map > 0],
-                                       self.percentile_exploitation)
+                conf_feats = (self.one_map.confidence_map > 0)
+                if self.one_map.layered:
+                    conf_feats = (self.one_map.confidence_map_feats > 0)
+                top_10 = np.percentile(adjusted_score[conf_feats],
+                                        self.percentile_exploitation)
                 top_map = (adjusted_score > top_10).astype(np.uint8)
+                if self.one_map.layered:
+                    top_map = np.sum(top_map, axis=-1).astype(np.uint8)
                 k = np.ones((7, 7), np.uint8)
                 top_map = cv2.dilate(top_map, k, iterations=1)
                 if not top_map[self.chosen_detection[0], self.chosen_detection[1]]:
@@ -713,11 +738,19 @@ class Navigator:
             else:
                 return
         if self.previous_sims is not None:
-            map_features = map_features[mask, :].permute(1, 0).unsqueeze(0)
+            if self.one_map.layered:
+                map_features = map_features[mask, :, :].permute(2, 0, 1).unsqueeze(0)
+            else:
+                map_features = map_features[mask, :].permute(1, 0).unsqueeze(0)
         else:
-            map_features = map_features.permute(2, 0, 1).unsqueeze(0)
+            if self.one_map.layered:
+                map_features = map_features.permute(3, 0, 1, 2).unsqueeze(0)
+            else:
+                map_features = map_features.permute(2, 0, 1).unsqueeze(0)
 
         similarity = self.model.compute_similarity(map_features, self.query_text_features)
+        # if self.one_map.layered:
+        #     similarity = torch.sum(similarity, dim=-1)
 
         if self.previous_sims is None:
             self.previous_sims = similarity

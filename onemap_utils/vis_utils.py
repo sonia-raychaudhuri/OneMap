@@ -3,7 +3,7 @@ import os
 import imageio
 import numpy as np
 import torch
-import tqdm
+import textwrap
 
 # cv2
 import cv2
@@ -17,11 +17,7 @@ from typing import (
     Optional,
     Union,
 )
-from habitat.utils.visualizations.utils import (
-    observations_to_image,
-    append_text_underneath_image,
-    tile_images
-)
+from habitat.utils.visualizations.utils import tile_images
 import supervision as sv
 from PIL import Image
 
@@ -144,6 +140,44 @@ def generate_video(
         images, video_dir, video_name, fps=fps, verbose=verbose
     )
 
+def append_text_underneath_image(image: np.ndarray, text: str):
+    """Appends text underneath an image of size (height, width, channels).
+
+    The returned image has white text on a black background. Uses textwrap to
+    split long text into multiple lines.
+
+    :param image: The image to appends text underneath.
+    :param text: The string to display.
+    :return: A new image with text appended underneath.
+    """
+    h, w, c = image.shape
+    font_size = 1.5
+    font_thickness = 2
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    blank_image = np.zeros(image.shape, dtype=np.uint8)
+
+    char_size = cv2.getTextSize(" ", font, font_size, font_thickness)[0]
+    wrapped_text = textwrap.wrap(text, width=int(w / char_size[0]))
+
+    y = 0
+    for line in wrapped_text:
+        textsize = cv2.getTextSize(line, font, font_size, font_thickness)[0]
+        y += textsize[1] + 10
+        x = 10
+        cv2.putText(
+            blank_image,
+            line,
+            (x, y),
+            font,
+            font_size,
+            (255, 255, 255),
+            font_thickness,
+            lineType=cv2.LINE_AA,
+        )
+    text_image = blank_image[0 : y + 10, 0:w]
+    final = np.concatenate((image, text_image), axis=0)
+    return final
+
 def add_sim_maps_to_image(observation: Dict, maps: Dict=None, info: Dict=None, text_to_append: str = "") -> np.ndarray:
 
     render_obs_images: List[np.ndarray] = []
@@ -184,6 +218,11 @@ def add_sim_maps_to_image(observation: Dict, maps: Dict=None, info: Dict=None, t
                     obs_k = obs_k.astype(np.uint8)
                 if len(obs_k.shape) == 3 and obs_k.shape[2] == 4:
                     obs_k = obs_k[:, :, :3]
+                if len(maps) > 0 and "draw_found_on_map" in maps:
+                    goal_center = maps["draw_found_on_map"]
+                    start_y, end_y, = goal_center[0] - 10, goal_center[0] + 10
+                    start_x, end_x, = goal_center[1] - 10, goal_center[1] + 10
+                    obs_k = cv2.rectangle(obs_k.astype(np.uint8), (start_x, start_y), (end_x, end_y), (128, 128, 0), thickness=2)
 
                 if sensor_name == "depth":
                     mask = obs_k == float('inf')
@@ -209,7 +248,7 @@ def add_sim_maps_to_image(observation: Dict, maps: Dict=None, info: Dict=None, t
 
     ## add sim maps to the frame
     if len(maps) > 0:
-        if "sim_map" in maps:
+        if "sim_map" in maps and maps["sim_map"] is not None:
             _image = maps["sim_map"]
             old_h, old_w, _ = _image.shape
             img_height = render_frame.shape[0]
@@ -221,6 +260,32 @@ def add_sim_maps_to_image(observation: Dict, maps: Dict=None, info: Dict=None, t
                 interpolation=cv2.INTER_CUBIC,
             )
             render_frame = np.concatenate((render_frame, _image), axis=1)
+        if "sim_map_layers" in maps:
+            _images = maps["sim_map_layers"]
+            font_size = 1.5
+            font_thickness = 2
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            for i, _image in enumerate(_images):
+                old_h, old_w, _ = _image.shape
+                img_height = render_frame.shape[0]
+                img_width = int(float(img_height) / old_h * old_w)
+                # cv2 resize (dsize is width first)
+                _image = cv2.resize(
+                    _image,
+                    (img_width, img_height),
+                    interpolation=cv2.INTER_CUBIC,
+                )
+                cv2.putText(
+                    _image,
+                    f"layer {i}",
+                    (img_width-200, img_height-50),
+                    font,
+                    font_size,
+                    (0, 0, 0),
+                    font_thickness,
+                    lineType=cv2.LINE_AA,
+                )
+                render_frame = np.concatenate((render_frame, _image), axis=1)
         if "traversable_map" in maps:
             _image = maps["traversable_map"]
             old_h, old_w, _ = _image.shape

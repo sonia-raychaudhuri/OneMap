@@ -23,3 +23,8 @@ class MappingConf:
     floor_level: float
     floor_threshold: float
 
+    layered: bool = False
+    z_bins_lower: float = 0.0
+    z_bins_upper: float = 3.0
+    z_bins_step: float = 3.0
+

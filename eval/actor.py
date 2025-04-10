@@ -10,7 +10,7 @@ from vision_models.clip_dense import ClipModel
 from vision_models.yolo_world_detector import YOLOWorldDetector
 # from vision_models.grounding_dino_detector import GroundingDinoDetector
 # from vision_models.yolov8_model import YoloV8Detector
-# from vision_models.point_nav_policy import WrappedPointNavResNetPolicy
+from vision_models.point_nav_policy import WrappedPointNavResNetPolicy
 # from vision_models.yolov6_model import YOLOV6Detector
 from vision_models.yolov7_model import YOLOv7Detector
 
@@ -50,8 +50,8 @@ class MONActor(Actor):
         self.policy = None
         self.action_lookup = [None, 'move_forward', 'turn_left', 'turn_right']
         self.square = config.square_im
-        # if config.use_pointnav:
-            # self.policy = WrappedPointNavResNetPolicy("/home/finn/External/vlfm/pointnav.pth", "/home/finn/External/vlfm/pointnav_conf.pth", "cuda")
+        if config.use_pointnav:
+            self.policy = WrappedPointNavResNetPolicy(config.pointnav_ckpt_path, "/home/finn/External/vlfm/pointnav_conf.pth", "cuda")
 
         self.mapper = Navigator(model, detector, config)
 

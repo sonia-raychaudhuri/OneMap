@@ -10,7 +10,7 @@ from torch import Tensor
 from depth_camera_filtering import filter_depth
 
 from torch import Tensor
-from vlfm.obs_transformers.utils import image_resize
+from habitat_baselines.utils.common import image_resize_shortest_edge as image_resize
 
 def get_rotation_matrix(angle: float, ndims: int = 2) -> np.ndarray:
     """Returns a 2x2 or 3x3 rotation matrix for a given angle; if 3x3, the z-axis is
