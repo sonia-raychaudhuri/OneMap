@@ -288,7 +288,7 @@ def add_sim_maps_to_image(observation: Dict, maps: Dict=None, info: Dict=None, t
                 render_frame = np.concatenate((render_frame, _image), axis=1)
         
         next_layer_frames = []
-        if "obstcl_map_layers" in maps:
+        if "obstcl_map_layers" in maps and maps["obstcl_map_layers"] is not None:
             if "traversable_map" in maps:
                 _image = maps["traversable_map"]
                 old_h, old_w, _ = _image.shape

@@ -473,13 +473,14 @@ class RerunLogger:
             similarities = (similarities + 1.0) / 2.0
             log_map_rerun(similarities[0], path="map/similarity")
 
-        obstacles_layered = self.mapper.one_map.obstacle_map_layered.cpu().numpy()
-        if len(obstacles_layered.shape) > 2 and obstacles_layered.shape[-1] > 1:
-            # show 3 layers at most for now
-            for i in range(3):
-                if i >= obstacles_layered.shape[-1]:
-                    break
-                log_map_rerun(obstacles_layered[:,:,i], path=f"map/obstacle/layer{i+1}")
+        if self.mapper.one_map.layered:
+            obstacles_layered = self.mapper.one_map.obstacle_map_layered.cpu().numpy()
+            if len(obstacles_layered.shape) > 2 and obstacles_layered.shape[-1] > 1:
+                # show 3 layers at most for now
+                for i in range(3):
+                    if i >= obstacles_layered.shape[-1]:
+                        break
+                    log_map_rerun(obstacles_layered[:,:,i], path=f"map/obstacle/layer{i+1}")
 
         # log_map_rerun(confidences, path="map/confidence")
 

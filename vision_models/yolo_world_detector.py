@@ -42,7 +42,7 @@ class YOLOWorldDetector:
             cls = detection.class_id
             class_name = detection.class_name
 
-            if class_name == self.classes[0] and detection.confidence > self.confidence_threshold:
+            if class_name in self.classes and detection.confidence > self.confidence_threshold:
                 x1 = detection.x - detection.width / 2
                 y1 = detection.y - detection.height / 2
                 x2 = detection.x + detection.width / 2

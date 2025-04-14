@@ -356,7 +356,10 @@ class OneMap:
             self.occluded_map = (self.obstacle_map > self.obstacle_map_threshold).cpu().numpy()
             if artifical_obstacles is not None:
                 for obs in artifical_obstacles:
-                    self.occluded_map[obs[0], obs[1]] = True
+                    try:
+                        self.occluded_map[obs[0], obs[1]] = True
+                    except:
+                        pass
             self.navigable_map = 1 - cv2.dilate((self.occluded_map).astype(np.uint8),
                                                 self.navigable_kernel, iterations=1).astype(bool)
 

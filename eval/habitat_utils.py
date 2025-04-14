@@ -75,6 +75,33 @@ def get_dist_to_bbox_2d(center, size, pos, bbox=None):
         """
         return 0
 
+def within_fov_cone(
+    cone_origin: np.ndarray,
+    cone_angle: float,
+    cone_fov: float,
+    cone_range: float,
+    points: np.ndarray,
+) -> np.ndarray:
+    """Checks if points are within a cone of a given origin, angle, fov, and range.
+    from VLFM code
+
+    Args:
+        cone_origin (np.ndarray): The origin of the cone.
+        cone_angle (float): The angle of the cone in radians.
+        cone_fov (float): The field of view of the cone in radians.
+        cone_range (float): The range of the cone.
+        points (np.ndarray): The points to check.
+
+    Returns:
+        boolean: True if the points are within the fov.
+    """
+    directions = points[:, :3] - cone_origin
+    dists = np.linalg.norm(directions, axis=1)
+    angles = np.arctan2(directions[:, 1], directions[:, 0])
+    angle_diffs = np.mod(angles - cone_angle + np.pi, 2 * np.pi) - np.pi
+
+    mask = np.logical_and(dists <= cone_range, np.abs(angle_diffs) <= cone_fov / 2)
+    return np.any(mask)
 
 def get_closest_dist(pos, aabbs: List, is_gibson=False, is_langmon=False):
     min_dist = np.inf

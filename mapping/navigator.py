@@ -234,7 +234,8 @@ class Navigator:
         self.one_map.set_camera_matrix(camera_matrix)
 
     def set_query(self,
-                  txt: List[str]
+                  txt: List[str],
+                  full_query: str
                   ) -> None:
         """
         Sets the query text
@@ -258,7 +259,7 @@ class Navigator:
                 
             self.previous_sims = None
             self.one_map.reset_checked_map()
-            self.detector.set_classes(self.query_text)
+            self.detector.set_classes([full_query])
             self.object_detected = False
             self.get_map(False)
     
@@ -561,10 +562,10 @@ class Navigator:
         if len(detections["boxes"]) > 0:
             # wants rgb
             self.sam_predictor.set_image(image.transpose(1, 2, 0))
-            for area, confidence in zip(detections["boxes"], detections['scores']):
+            for area, confidence, label in zip(detections["boxes"], detections['scores'], detections["labels"]):
                 if self.log:
                     rr.log("camera/detection", rr.Boxes2D(array_format=rr.Box2DFormat.XYXY, array=area))
-                    rr.log("object_detections", rr.TextLog(f"Object {self.query_text[0]} detected"))
+                    rr.log("object_detections", rr.TextLog(f"Object {label} detected"))
 
                 # TODO Find free point in front of object
                 chosen_detection = (
@@ -613,7 +614,7 @@ class Navigator:
                         print(top_10)
                         if self.one_map.layered:
                             top_map[self.one_map.confidence_map_feats == 0] = 0
-                            top_map = np.sum(top_map, axis=-1).astype(np.uint8)
+                            top_map = np.max(top_map, axis=-1).astype(np.uint8)
                         else:
                             top_map[self.one_map.confidence_map == 0] = 0
                         k = np.ones((7, 7), np.uint8)
@@ -683,7 +684,7 @@ class Navigator:
                                     self.percentile_exploitation)
             top_map = (adjusted_score > top_10).astype(np.uint8)
             if self.one_map.layered:
-                top_map = np.sum(top_map, axis=-1).astype(np.uint8)
+                top_map = np.max(top_map, axis=-1).astype(np.uint8)
             k = np.ones((3, 3), np.uint8)
             top_map = cv2.dilate(top_map, k, iterations=1)
             log_map_rerun(top_map, path="map/similarity_th")
@@ -703,7 +704,7 @@ class Navigator:
                                         self.percentile_exploitation)
                 top_map = (adjusted_score > top_10).astype(np.uint8)
                 if self.one_map.layered:
-                    top_map = np.sum(top_map, axis=-1).astype(np.uint8)
+                    top_map = np.max(top_map, axis=-1).astype(np.uint8)
                 k = np.ones((7, 7), np.uint8)
                 top_map = cv2.dilate(top_map, k, iterations=1)
                 if not top_map[self.chosen_detection[0], self.chosen_detection[1]]:
@@ -746,8 +747,6 @@ class Navigator:
                 map_features = map_features.permute(2, 0, 1).unsqueeze(0)
 
         similarity = self.model.compute_similarity(map_features, self.query_text_features)
-        # if self.one_map.layered:
-        #     similarity = torch.sum(similarity, dim=-1)
 
         if self.previous_sims is None:
             self.previous_sims = similarity
